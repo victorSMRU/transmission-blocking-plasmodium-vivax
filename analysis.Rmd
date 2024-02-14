@@ -1,0 +1,2501 @@
+---
+title: "Transmission-blocking activity of artesunate, chloroquine and methylene blue on Plasmodium vivax gametocytes"
+author: "Victor Chaumeau & James A. Watson"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    toc: yes
+    number_sections: no
+    keep_md: yes
+---
+
+# Foreword
+
+This analysis was carried out by Dr. Victor Chaumeau* under the supervision of Dr. James A. Waston, who wrote the Stan code for the Bayesian multi-level model used in this study.
+
+\* For correspondence: victor@shoklo-unit.com
+
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(cache = TRUE, cache.comments = FALSE,
+                      echo = F, include = TRUE, 
+                      fig.width = 8, fig.height = 8,
+                      fig.pos = 'H',dev = 'png', dpi = 300, cache.lazy = FALSE)
+library(RColorBrewer)
+library(extrafont)
+library(tidyr)
+library(rstan)
+library(plotrix)
+library(scales)
+library(EnvStats)
+library(tidyverse)
+library(lme4)
+
+if (isFALSE(dir.exists('tables'))) {dir.create('tables')}
+
+set.seed(123)
+options(mc.cores = parallel::detectCores())
+rstan_options(auto_write = TRUE)
+
+RUN_MODELS=F
+
+```
+
+# Session information
+
+```{r session_info}
+
+sessionInfo()
+
+```
+
+```{r load_dataset}
+
+load("Rdata/tblMosquitoFeeds.Rdata")
+load("Rdata/tblOocysts.Rdata")
+load("Rdata/tblSporozoites.Rdata")
+load("Rdata/tblMicroscopy.Rdata")
+load("Rdata/dtsOocysts.Rdata")
+load("Rdata/dtsSporozoites.Rdata")
+load("Rdata/dta_oocysts.Rdata")
+load("Rdata/dta_sporozoites.Rdata")
+
+```
+
+```{r run_models}
+
+mod = rstan::stan_model(file = 'code/count_model.stan')
+
+f_name = './Rdata/mod_out.RDS'
+
+init = list(chain1=list(a0_log=runif(1,-2,0),a1_log=runif(1,-2,0)),
+              chain2=list(a0_log=runif(1,-2,0),a1_log=runif(1,-2,0)),
+              chain3=list(a0_log=runif(1,-2,0),a1_log=runif(1,-2,0)),
+              chain4=list(a0_log=runif(1,-2,0),a1_log=runif(1,-2,0)))
+
+init2 = list(chain1=list(a0_log=runif(1,-8,-6),a1_log=runif(1,-1,0)),
+              chain2=list(a0_log=runif(1,-8,-6),a1_log=runif(1,-1,0)),
+              chain3=list(a0_log=runif(1,-8,-6),a1_log=runif(1,-1,0)),
+              chain4=list(a0_log=runif(1,-8,-6),a1_log=runif(1,-1,0)))
+
+dta_sporozoites$K_pred = dta_oocysts$K_pred = 100
+dta_sporozoites$mu_pred = dta_oocysts$mu_pred =  10^seq(-4, 5, length.out=dta_oocysts$K_pred)
+  
+if(RUN_MODELS | !file.exists(f_name)){
+  
+  
+  out_oocyst = sampling(mod, data = dta_oocysts, seed=33,
+                        chain = 4, iter = 4000, thin=10, init=init)
+
+  out_sporozoite = sampling(mod, data = dta_sporozoites, seed=33,
+                            chain = 4, iter = 4000, thin=10, init=init2)
+
+  save(out_oocyst, out_sporozoite, file = f_name)
+
+} else {
+  
+  load(f_name)
+  
+}
+
+```
+
+# Summary of assay runs
+
+```{r summary_table}
+
+# Calculate the number of samples and batch using the mosquito feeds data table
+
+df1 = tblMosquitoFeeds
+
+# Remove experiment PVTBA1 (used to set up the protocol, not part of the study design)
+
+df1 = df1[df1$ExperimentTag != "PVTBA1", ]
+
+# Remove experiment PVTBA5 (cancelled because of the COVID)
+
+df1 = df1[df1$ExperimentTag != "PVTBA5", ]
+
+# Add group allocation
+
+ls_as = unique(df1$ExperimentTag[grep('AS', df1$Details)])
+ls_cq = unique(df1$ExperimentTag[grep('CQ', df1$Details)])
+ls_mb = unique(df1$ExperimentTag[grep('MB', df1$Details)])
+
+df1$Drug[df1$ExperimentTag %in% ls_as] = "AS"
+df1$Drug[df1$ExperimentTag %in% ls_cq] = "CQ"
+df1$Drug[df1$ExperimentTag %in% ls_mb] = "MB"
+
+# Add treatment state
+
+df1$Condition2[df1$Condition == "QC"] = "baseline"
+df1$Condition2[df1$Condition == "A" | df1$Condition == "B" | df1$Condition == "C" | df1$Condition == "D"] = "control"
+df1$Condition2[df1$Condition == "E" | df1$Condition == "F" | df1$Condition == "G" | df1$Condition == "H"] = "treatment"
+
+# Calculate the number of dissected guts using the oocyst data table
+
+df2 = tblOocysts
+
+# Add group allocation
+
+df2$Drug[df2$ExperimentTag %in% ls_as] = "AS"
+df2$Drug[df2$ExperimentTag %in% ls_cq] = "CQ"
+df2$Drug[df2$ExperimentTag %in% ls_mb] = "MB"
+
+# Add treatment state
+
+df2$Condition2[df2$Condition == "QC"] = "baseline"
+df2$Condition2[df2$Condition == "A" | df2$Condition == "B" | df2$Condition == "C" | df2$Condition == "D"] = "control"
+df2$Condition2[df2$Condition == "E" | df2$Condition == "F" | df2$Condition == "G" | df2$Condition == "H"] = "treatment"
+
+# Calculate the number of dissected glands using the sporozoite data table
+
+df3 = tblSporozoites
+
+# Add group allocation
+
+df3$Drug[df3$ExperimentTag %in% ls_as] = "AS"
+df3$Drug[df3$ExperimentTag %in% ls_cq] = "CQ"
+df3$Drug[df3$ExperimentTag %in% ls_mb] = "MB"
+
+# Add treatment state
+
+df3$Condition2[df3$Condition == "QC"] = "baseline"
+df3$Condition2[df3$Condition == "A" | df3$Condition == "B" | df3$Condition == "C" | df3$Condition == "D"] = "control"
+df3$Condition2[df3$Condition == "E" | df3$Condition == "F" | df3$Condition == "G" | df3$Condition == "H"] = "treatment"
+
+# Make the summary table
+
+df = cbind(
+  tapply(df1$ExperimentTag, df1$Drug, function(x)length(unique(x))),
+  tapply(df1$Tag, list(df1$Drug, df1$Condition2), length),
+  tapply(df2$Tag, list(df2$Drug, df2$Condition2), length),
+  tapply(df3$Tag, list(df3$Drug, df3$Condition2), length))
+
+# Rename variables
+
+colnames(df) = c("No. of blood samples",
+                 "No. baseline batches",
+                 "No. control batches",
+                 "No. treated batches",
+                 "No. dissected guts in baseline bacthes",
+                 "No. dissected guts in control bacthes",
+                 "No. dissected guts in treated bacthes",
+                 "No. dissected pairs of salivary glands in baseline batches",
+                 "No. dissected pairs of salivary glands in control batches",
+                 "No. dissected pairs of salivary glands in treated batches")
+
+# Extract numbers cited in the main text
+
+n_samples = sum(df[,1])
+n_batches = sum(df[,2:4])
+n_dissected = sum(df[,5:10])
+
+# Save output table
+
+write.csv(df, file = "tables/summary_assay_runs.csv")
+
+# Display the summary table in the output document
+
+knitr::kable(df, caption = "Table 1. Summary of assay runs")
+
+```
+
+`r n_samples` vivax malaria patients took part in the study and provided a blood sample before receiving antimalarial drug regimen, `r n_batches` mosquito batches were fed on these samples and  `r n_dissected` specimens were dissected for assessment of either oocyst or sporozoite count.
+
+# Baseline characteristics of the samples
+
+```{r baseline_microscopy_data}
+
+dta = tblMicroscopy
+
+# Add group allocation
+
+dta$Drug[dta$ExperimentTag %in% ls_as] = "AS"
+dta$Drug[dta$ExperimentTag %in% ls_cq] = "CQ"
+dta$Drug[dta$ExperimentTag %in% ls_mb] = "MB"
+
+```
+
+## Asexual parasitaemia
+
+```{r baseline_parasitemia, echo=T}
+
+quantile(dta$AsexualParasitaemia, probs = c(0.5, 0.25, 0.75))
+aggregate(AsexualParasitaemia~Drug, FUN = quantile, probs = c(0.5,0.25,0.75), data = dta)
+
+```
+
+```{r baseline_parasitemia_main_text}
+
+median_parasitemia = as.character(round(quantile(dta$AsexualParasitaemia, probs = c(0.5)),0))
+q25_parasitemia = as.character(round(quantile(dta$AsexualParasitaemia, probs = c(0.25)),0))
+q75_parasitemia = as.character(round(quantile(dta$AsexualParasitaemia, probs = c(0.75)),0))
+
+```
+
+## Gametocytaemia
+
+```{r baseline_gametocytemia, echo=T}
+
+quantile(dta$Gametocytaemia, probs = c(0.5,0.25,0.75))
+aggregate(Gametocytaemia~Drug, FUN = quantile, probs = c(0.5,0.25,0.75), data = dta)
+
+```
+
+```{r baseline_gametocytemia_main_text}
+
+median_gametocytemia = as.character(round(quantile(dta$Gametocytaemia, probs = c(0.5)),0))
+q25_gametocytemia = as.character(round(quantile(dta$Gametocytaemia, probs = c(0.25)),0))
+q75_gametocytemia = as.character(round(quantile(dta$Gametocytaemia, probs = c(0.75)),0))
+
+```
+
+## Oocyst index
+
+```{r baseline_oocyst_index_data}
+
+dta = tblOocysts
+
+# Subset baseline data
+
+dta = dta[dta$Condition == "QC", ]
+
+# Add group allocation
+
+dta$Drug[dta$ExperimentTag %in% ls_as] = "AS"
+dta$Drug[dta$ExperimentTag %in% ls_cq] = "CQ"
+dta$Drug[dta$ExperimentTag %in% ls_mb] = "MB"
+
+# Aggregate the data by experimental group and assay run
+
+dta_agg = aggregate(NbOocysts>0~ExperimentTag + Drug, FUN = mean, data = dta)
+
+```
+
+```{r baseline_oocyst_index, echo=T}
+
+quantile(dta_agg$`NbOocysts > 0`, probs = c(0.5,0.25,0.75))
+aggregate(`NbOocysts > 0`~Drug, FUN = quantile, probs = c(0.5,0.25,0.75), data = dta_agg)
+
+```
+
+```{r baseline_oocyst_index_main_text}
+
+median_oocyst_index = quantile(dta_agg$`NbOocysts > 0`, probs = c(0.5))
+q25_oocyst_index = quantile(dta_agg$`NbOocysts > 0`, probs = c(0.25))
+q75_oocyst_index = quantile(dta_agg$`NbOocysts > 0`, probs = c(0.75))
+
+```
+
+## Oocyst count
+
+```{r baseline_oocyst_count_data}
+
+dta = tblOocysts[tblOocysts$Condition == "QC", ]
+
+dta$Drug[dta$ExperimentTag %in% ls_as] = "AS"
+dta$Drug[dta$ExperimentTag %in% ls_cq] = "CQ"
+dta$Drug[dta$ExperimentTag %in% ls_mb] = "MB"
+
+dta_agg = aggregate(NbOocysts~ExperimentTag + Drug, FUN = median, data = dta)
+
+```
+
+```{r baseline_oocyst_count}
+
+quantile(dta_agg$NbOocysts, probs = c(0.5,0.25,0.75))
+aggregate(NbOocysts~Drug, FUN = quantile, probs = c(0.5,0.25,0.75), data = dta_agg)
+
+```
+
+```{r baseline_oocyst_count_main_text}
+
+median_oocyst_count = round(quantile(dta_agg$NbOocysts, probs = c(0.5)),1)
+q25_oocyst_count = round(quantile(dta_agg$NbOocysts, probs = c(0.25)),1)
+q75_oocyst_count = round(quantile(dta_agg$NbOocysts, probs = c(0.75)),1)
+
+```
+
+## Sporozoite index
+
+```{r baseline_sporozoite_index_data}
+
+dta = tblSporozoites
+
+# Subset baseline data
+
+dta = dta[dta$Condition == "QC", ]
+
+# Add group allocation
+
+dta$Drug[dta$ExperimentTag %in% ls_as] = "AS"
+dta$Drug[dta$ExperimentTag %in% ls_cq] = "CQ"
+dta$Drug[dta$ExperimentTag %in% ls_mb] = "MB"
+
+# Aggregate the data by experimental group and assay run
+
+dta_agg = aggregate(NbSporozoites2>0~ExperimentTag + Drug, FUN = mean, data = dta)
+
+```
+
+```{r baseline_sporozoite_index, echo=T}
+
+quantile(dta_agg$`NbSporozoites2 > 0`, probs = c(0.5,0.25,0.75))
+aggregate(`NbSporozoites2 > 0`~Drug, FUN = quantile, probs = c(0.5,0.25,0.75), data = dta_agg)
+
+```
+
+```{r baseline_sporozoite_index_main_text}
+
+median_sporozoite_index = quantile(dta_agg$`NbSporozoites2 > 0`, probs = c(0.5))
+q25_sporozoite_index = quantile(dta_agg$`NbSporozoites2 > 0`, probs = c(0.25))
+q75_sporozoite_index = quantile(dta_agg$`NbSporozoites2 > 0`, probs = c(0.75))
+
+```
+
+## Sporozoite count
+
+```{r baseline_sporozoite_count_data}
+
+dta = tblSporozoites
+
+# Subset baseline data
+
+dta = dta[dta$Condition == "QC", ]
+
+# Add group allocation
+
+dta$Drug[dta$ExperimentTag %in% ls_as] = "AS"
+dta$Drug[dta$ExperimentTag %in% ls_cq] = "CQ"
+dta$Drug[dta$ExperimentTag %in% ls_mb] = "MB"
+
+# Aggregate the data by experimental group and assay run
+
+dta_agg = aggregate(NbSporozoites2~ExperimentTag + Drug, FUN = median, data = dta)
+
+```
+
+```{r baseline_sporozoite_count, echo=T}
+
+quantile(dta_agg$NbSporozoites2, probs = c(0.5,0.25,0.75))
+aggregate(NbSporozoites2~Drug, FUN = quantile, probs = c(0.5,0.25,0.75), data = dta_agg)
+
+```
+
+```{r baseline_sporozoite_count_main_text}
+
+median_sporozoite_count = quantile(dta_agg$NbSporozoites2, probs = c(0.5))
+q25_sporozoite_count = quantile(dta_agg$NbSporozoites2, probs = c(0.25))
+q75_sporozoite_count = quantile(dta_agg$NbSporozoites2, probs = c(0.75))
+
+```
+
+Overall, the median asexual parasitaemia was `r median_parasitemia` parasites /uL (inter-quartile range, IQR: `r q25_parasitemia` to `r q75_parasitemia`) and the median gametocytaemia was `r median_gametocytemia` gametocytes /uL (IQR: `r q25_gametocytemia` to `r q75_gametocytemia`). All blood samples but one were infectious to mosquitoes (`r round((n_samples -1) / n_samples * 100, 1)`%, the sample that was not infectious during baseline became infectious after 24 hours of incubation). The median oocyst index (i.e., the proportion of mosquitoes harboring malaria oocysts) and oocyst count in mosquito samples were `r median_oocyst_index` (IQR: `r q25_oocyst_index` to `r q75_oocyst_index`) and `r median_oocyst_count` oocysts per mosquito (IQR: `r q25_oocyst_count` to `r q75_oocyst_count`). The corresponding figures for the sporozoite stage were `r median_sporozoite_index` (IQR: `r q25_sporozoite_index` to `r q75_sporozoite_index`) and `r median_sporozoite_count` sporozoites per mosquito (IQR: `r q25_sporozoite_count` to `r q75_sporozoite_count`).
+
+## Evolution of parasite count during incubation ex vivo
+
+```{r ratio control/baseline, echo=FALSE}
+
+# Oocyst stage
+
+df = data.frame(
+  ExperimentTag = tblOocysts$ExperimentTag,
+  Condition = tblOocysts$Condition,
+  NbOocysts = tblOocysts$NbOocysts
+  )
+
+df = df[df$ExperimentTag != 'PVTBA1', ]
+
+df = df[df$Condition != 'E', ]
+df = df[df$Condition != 'F', ]
+df = df[df$Condition != 'G', ]
+df = df[df$Condition != 'H', ]
+
+df$Condition2 = ifelse(df$Condition == 'QC', 'baseline', 'control')
+
+df$Regiment[df$ExperimentTag %in% ls_as] = 'AS'
+df$Regiment[df$ExperimentTag %in% ls_cq] = 'CQ'
+df$Regiment[df$ExperimentTag %in% ls_mb] = 'MB'
+
+df = aggregate(NbOocysts ~ ExperimentTag + Condition2, FUN = quantile, 0.5, data = df)
+df = pivot_wider(df, names_from = Condition2, values_from = NbOocysts)
+df$Ratio = df$control/df$baseline
+
+q50_oocyst = round(quantile(df$Ratio, 0.5),2)
+q25_oocyst = round(quantile(df$Ratio, 0.25),2)
+q75_oocyst = round(quantile(df$Ratio, 0.75),2)
+
+df1 = df
+
+# Sporozoite stage
+
+df = data.frame(
+  ExperimentTag = tblSporozoites$ExperimentTag,
+  Condition = tblSporozoites$Condition,
+  NbSporozoites2 = tblSporozoites$NbSporozoites2
+  )
+
+df = df[df$ExperimentTag != 'PVTBA1', ]
+
+df = df[df$Condition != 'E', ]
+df = df[df$Condition != 'F', ]
+df = df[df$Condition != 'G', ]
+df = df[df$Condition != 'H', ]
+
+df$Condition2 = ifelse(df$Condition == 'QC', 'baseline', 'control')
+
+df$Regiment[df$ExperimentTag %in% ls_as] = 'AS'
+df$Regiment[df$ExperimentTag %in% ls_cq] = 'CQ'
+df$Regiment[df$ExperimentTag %in% ls_mb] = 'MB'
+
+df = aggregate(NbSporozoites2 ~ ExperimentTag + Condition2, FUN = quantile, 0.5, data = df)
+df = pivot_wider(df, names_from = Condition2, values_from = NbSporozoites2)
+df$Ratio = df$control/df$baseline
+
+q50_sporozoite = round(quantile(df$Ratio, 0.5, na.rm = T),2)
+q25_sporozoite = round(quantile(df$Ratio, 0.25, na.rm = T),2)
+q75_sporozoite = round(quantile(df$Ratio, 0.75, na.rm = T),2)
+
+df2 = df
+
+```
+
+The median ratio of the median parasite count in the controls to the median parasite count at baseline was `r q50_oocyst` (IQR: `r q25_oocyst` to `r q75_oocyst`) and `r q50_sporozoite` (IQR: `r q25_sporozoite` to `r q75_sporozoite`) for the oocyst and sporozoite stage, respectively.
+
+```{r ratio_control_baseline, fig.width = 8, fig.height = 4, echo = F}
+
+# Graphical parameters
+
+par(mfrow = c(1,2), las=1, font.lab = 2, family='Times New Roman')
+
+# Oocyst stage
+
+df = df1
+
+# Make an empty plot
+
+plot(NULL, xlab="", ylab="", xaxt="n", yaxt="n", xlim=c(-0.2, 1.2), ylim=c(0, 3),  panel.first=grid())
+
+# Add axis
+
+axis(side = 1, at = 0:1, labels = c('Baseline','Control'))
+axis(side = 2, at = seq(from = 0, to = 3, by = 1), labels = c(1,10,"10^2","10^3"))
+
+title(ylab = 'Median oocyst count')
+title(xlab = 'Exposure')
+
+# Add points
+points(log10(df$baseline)~rep(0, nrow(df)))
+points(log10(df$control)~rep(1, nrow(df)))
+
+# Add connecting lines
+
+segments(x0 = rep(0, nrow(df)), y0 = log10(df$baseline), x1 = rep(1, nrow(df)), y1 = log10(df$control))
+
+# Sporozoite stage
+
+df = df2
+df$control2 = log10(df$control)
+df$control2[is.infinite(df$control2)] = 0
+df$baseline2 = log10(df$baseline)
+df$baseline2[is.infinite(df$baseline2)] = 0
+
+# Make an empty plot
+
+plot(NULL, xlab="", ylab="", xaxt="n", yaxt="n", xlim=c(-0.2, 1.2), ylim=c(0, 5),  panel.first=grid())
+
+# Add axis
+
+axis(side = 1, at = 0:1, labels = c('Baseline','Control'))
+axis(side = 2, at = seq(from = 0, to = 5, by = 1), labels = c(0, 10,"10^2","10^3","10^4","10^5"))
+axis.break(axis = 2, 0.5)
+
+title(ylab = 'Median sporozoite count')
+title(xlab = 'Exposure')
+
+# Add points
+points(df$baseline2~rep(0, nrow(df)))
+points(df$control2~rep(1, nrow(df)))
+
+# Add connecting lines
+
+segments(x0 = 0, y0 =df$baseline2, x1 = 1, y1 = df$control2)
+
+```
+
+
+# Prevalence estimates
+
+```{r prevalence_estimates}
+
+# Set the graphical parameters
+
+par(mfrow = c(2,1), las=1, font.lab = 2, family='Times New Roman')
+my_palette = brewer.pal(4,"Dark2")
+
+# Oocyst panel
+
+# Extract prevalence estimates from the model output
+
+thetas_prev = extract(out_oocyst, pars='prevalence_infection')$prevalence_infection
+
+# Make an empty plot
+
+plot(NULL, xlab = NA, ylab = NA, xlim = c(-2,3), ylim = c(0,1), xaxt = 'n', yaxt = 'n', panel.first=grid())
+
+# Add axis
+
+axis(1, at = seq(-2, 3, 1), labels = c(0.01,0.1,1,10,100,1000))
+axis(2, at = seq(0, 1, 0.2), labels = c(0,0.2,0.4,0.6,0.8,1))
+# axis.break(axis=1,-1.5,bgcol="white",breakcol="black", style="slash",brw=0.02)
+title(xlab = 'Mean oocyst count')
+title(ylab = 'Oocyst index')
+
+# Add model-fitted relationship and and credible interval
+
+lines(log10(dta_oocysts$mu_pred), colMeans(thetas_prev), lwd=2)
+polygon(x = c(log10(dta_oocysts$mu_pred), rev(log10(dta_oocysts$mu_pred))), y = c(apply(thetas_prev, 2, quantile, probs = 0.975), rev(apply(thetas_prev, 2, quantile, probs = 0.025))), col = alpha( 'grey50', .5), border = NA)
+lines(log10(dta_oocysts$mu_pred), apply(thetas_prev, 2, quantile, probs = 0.025), col = "grey50")
+lines(log10(dta_oocysts$mu_pred), apply(thetas_prev, 2, quantile, probs = 0.975), col = "grey50")
+
+# Observed data
+
+dat = data.frame(patient=dta_oocysts$patient_id,
+                 batch = dta_oocysts$batch_id,
+                 regimen = dta_oocysts$regimen_id,
+                 treatment = dta_oocysts$drug,
+                 positive = dta_oocysts$y>0,
+                 y = dta_oocysts$y)
+dat$patient=as.factor(dat$patient)
+dat$batch=as.factor(dat$batch)
+# dat$regimen=as.factor(dat$regimen*dat$treatment)
+
+# Aggregate observed data
+
+dat_agg = aggregate(cbind(positive, y) ~ patient + regimen + treatment + batch,
+                    FUN = mean,
+                    data = dat)
+
+dat_agg = dat_agg[dat_agg$y>0, ]
+
+# Set the color
+
+dat_agg$color = ifelse(dat_agg$treatment == 0, 0, dat_agg$regimen)
+
+dat_agg$color[dat_agg$color == 0] = my_palette[1]
+dat_agg$color[dat_agg$color == 1] = my_palette[2]
+dat_agg$color[dat_agg$color == 2] = my_palette[3]
+dat_agg$color[dat_agg$color == 3] = my_palette[4]
+
+# Add points
+
+points(log10(dat_agg$y), dat_agg$positive, pch=21, col = dat_agg$color, bg = alpha(dat_agg$color, 0.5))
+
+# Add legend
+
+legend(legend=c("Control", "Artesunate", "Chloroquine", "Methylene blue"), pch=21, col = my_palette, pt.bg = alpha(my_palette, 0.5), 'topleft', bty = 'n' )
+
+# Sporozoite panel
+
+# Extract prevalence estimates from the model output
+
+thetas_prev = extract(out_sporozoite, pars='prevalence_infection')$prevalence_infection
+
+# Make an empty plot
+
+plot(NULL, xlab = NA, ylab = NA, xlim = c(0,5), ylim = c(0,1), xaxt = 'n', yaxt = 'n', panel.first=grid())
+
+# Add axis
+
+axis(1, at = seq(0, 5, 1), labels = c(1,10,100,1000,10000,'100000'))
+axis(2, at = seq(0, 1, 0.2), labels = c(0,0.2,0.4,0.6,0.8,1))
+# axis.break(axis=1,-0.5,bgcol="white",breakcol="black", style="slash",brw=0.02)
+title(xlab = 'Mean sporozoite count')
+title(ylab = 'Sporozoite index')
+
+# Add model-fitted relationship and and credible interval
+
+lines(log10(dta_sporozoites$mu_pred), colMeans(thetas_prev), lwd=2)
+polygon(x = c(log10(dta_sporozoites$mu_pred), rev(log10(dta_sporozoites$mu_pred))), y = c(apply(thetas_prev, 2, quantile, probs = 0.975), rev(apply(thetas_prev, 2, quantile, probs = 0.025))), col = alpha( 'grey50', .5), border = NA)
+lines(log10(dta_sporozoites$mu_pred), apply(thetas_prev, 2, quantile, probs = 0.025), col = "grey50")
+lines(log10(dta_sporozoites$mu_pred), apply(thetas_prev, 2, quantile, probs = 0.975), col = "grey50")
+
+# Observed data
+
+dat = data.frame(patient=dta_sporozoites$patient_id,
+                 batch = dta_sporozoites$batch_id,
+                 regimen = dta_sporozoites$regimen_id,
+                 treatment = dta_sporozoites$drug,
+                 positive = dta_sporozoites$y>0,
+                 y = dta_sporozoites$y)
+
+# Aggregate observed data
+
+dat_agg = aggregate(cbind(positive, y) ~ patient + regimen + treatment + batch,
+                    FUN = mean,
+                    data = dat)
+
+dat_agg = dat_agg[dat_agg$y>0, ]
+
+# Set the color
+
+dat_agg$color = ifelse(dat_agg$treatment == 0, 0, dat_agg$regimen)
+dat_agg$color[dat_agg$color == 0] = my_palette[1]
+dat_agg$color[dat_agg$color == 1] = my_palette[2]
+dat_agg$color[dat_agg$color == 2] = my_palette[3]
+dat_agg$color[dat_agg$color == 3] = my_palette[4]
+
+# Add points
+
+points(log10(dat_agg$y), dat_agg$positive, pch=21, col = dat_agg$color, bg = alpha(dat_agg$color, 0.5))
+
+# Add legend
+
+legend(legend=c("Control", "Artesunate", "Chloroquine", "Methylene blue"), pch=21, col = my_palette, pt.bg = alpha(my_palette, 0.5), 'topleft', bty = 'n')
+
+# Add panel labels
+
+mtext('A', side = 3, line = -4, adj = 0, outer = TRUE, font = 2, cex = 2)
+mtext('B', side = 3, line = -24, adj = 0, outer = TRUE, font = 2, cex = 2)
+
+# Clear environment
+
+rm(dat, dat_agg, thetas_prev)
+
+```
+
+# Drug effects on parasite count and parasite index
+
+```{r drug_effect_main_text}
+
+# Oocyst stage
+
+dta = tblOocysts
+
+# Remove baseline data
+
+dta = dta[dta$Condition != "QC", ]
+
+# Add group allocation
+
+dta$Drug[dta$ExperimentTag %in% ls_as] = "AS"
+dta$Drug[dta$ExperimentTag %in% ls_cq] = "CQ"
+dta$Drug[dta$ExperimentTag %in% ls_mb] = "MB"
+
+# Add exposure state
+
+dta$Condition2[dta$Condition == "A" | dta$Condition == "B" | dta$Condition == "C" | dta$Condition == "D"] = "control"
+dta$Condition2[dta$Condition == "E" | dta$Condition == "F" | dta$Condition == "G" | dta$Condition == "H"] = "treated"
+
+# Aggregate observed data
+
+df = merge.data.frame(
+  aggregate(NbOocysts ~ Condition2 + Drug, FUN = length, data = dta),
+  aggregate(NbOocysts ~ Condition2 + Drug, FUN = length, data = dta[dta$NbOocysts>0,]),
+  by = c("Drug", "Condition2")
+)
+
+names(df) = c("Drug", "Exposure", "N", "n")
+
+df$Index = round(df$n/df$N*100, 2)
+
+# Artesunate group - control state
+
+as_ooc_cont = paste0(
+  df$n[df$Drug == "AS" & df$Exposure == "control"],
+  "/",
+  df$N[df$Drug == "AS" & df$Exposure == "control"],
+  " (",
+  df$Index[df$Drug == "AS" & df$Exposure == "control"],
+  "%)")
+
+# Artesunate group - exposed state
+
+as_ooc_treat = paste0(
+  df$n[df$Drug == "AS" & df$Exposure == "treated"],
+  "/",
+  df$N[df$Drug == "AS" & df$Exposure == "treated"],
+  " (",
+  df$Index[df$Drug == "AS" & df$Exposure == "treated"],
+  "%)")
+
+# Chloroquine group - control state
+
+cq_ooc_cont = paste0(
+  df$n[df$Drug == "CQ" & df$Exposure == "control"],
+  "/",
+  df$N[df$Drug == "CQ" & df$Exposure == "control"],
+  " (",
+  df$Index[df$Drug == "CQ" & df$Exposure == "control"],
+  "%)")
+
+# Chloroquine group - treated state
+
+cq_ooc_treat = paste0(
+  df$n[df$Drug == "CQ" & df$Exposure == "treated"],
+  "/",
+  df$N[df$Drug == "CQ" & df$Exposure == "treated"],
+  " (",
+  df$Index[df$Drug == "CQ" & df$Exposure == "treated"],
+  "%)")
+
+# Methylene blue group - control state
+
+mb_ooc_cont = paste0(
+  df$n[df$Drug == "MB" & df$Exposure == "control"],
+  "/",
+  df$N[df$Drug == "MB" & df$Exposure == "control"],
+  " (",
+  df$Index[df$Drug == "MB" & df$Exposure == "control"],
+  "%)")
+
+# Methylene blue group - treated state
+
+mb_ooc_treat = paste0(
+  df$n[df$Drug == "MB" & df$Exposure == "treated"],
+  "/",
+  df$N[df$Drug == "MB" & df$Exposure == "treated"],
+  " (",
+  df$Index[df$Drug == "MB" & df$Exposure == "treated"],
+  "%)")
+
+# Sporozoite stage
+
+dta = tblSporozoites
+
+# Remove baseline data
+
+dta = dta[dta$Condition != "QC", ]
+
+# Add group allocation
+
+dta$Drug[dta$ExperimentTag %in% ls_as] = "AS"
+dta$Drug[dta$ExperimentTag %in% ls_cq] = "CQ"
+dta$Drug[dta$ExperimentTag %in% ls_mb] = "MB"
+
+# Add exposure state
+
+dta$Condition2[dta$Condition == "A" | dta$Condition == "B" | dta$Condition == "C" | dta$Condition == "D"] = "control"
+dta$Condition2[dta$Condition == "E" | dta$Condition == "F" | dta$Condition == "G" | dta$Condition == "H"] = "treated"
+
+# Aggregate observed data
+
+df = merge.data.frame(
+  aggregate(NbSporozoites2 ~ Condition2 + Drug, FUN = length, data = dta),
+  aggregate(NbSporozoites2 ~ Condition2 + Drug, FUN = length, data = dta[dta$NbSporozoites2>0,]),
+  by = c("Drug", "Condition2")
+)
+
+names(df) = c("Drug", "Exposure", "N", "n")
+
+df$Index = round(df$n/df$N*100, 2)
+
+# Artesunate group - control state
+
+as_spz_cont = paste0(
+  df$n[df$Drug == "AS" & df$Exposure == "control"],
+  "/",
+  df$N[df$Drug == "AS" & df$Exposure == "control"],
+  " (",
+  df$Index[df$Drug == "AS" & df$Exposure == "control"],
+  "%)")
+
+# Artesunate group - exposed state
+
+as_spz_treat = paste0(
+  df$n[df$Drug == "AS" & df$Exposure == "treated"],
+  "/",
+  df$N[df$Drug == "AS" & df$Exposure == "treated"],
+  " (",
+  df$Index[df$Drug == "AS" & df$Exposure == "treated"],
+  "%)")
+
+# Chloroquine group - control state
+
+cq_spz_cont = paste0(
+  df$n[df$Drug == "CQ" & df$Exposure == "control"],
+  "/",
+  df$N[df$Drug == "CQ" & df$Exposure == "control"],
+  " (",
+  df$Index[df$Drug == "CQ" & df$Exposure == "control"],
+  "%)")
+
+# Chloroquine group - treated state
+
+cq_spz_treat = paste0(
+  df$n[df$Drug == "CQ" & df$Exposure == "treated"],
+  "/",
+  df$N[df$Drug == "CQ" & df$Exposure == "treated"],
+  " (",
+  df$Index[df$Drug == "CQ" & df$Exposure == "treated"],
+  "%)")
+
+# Methylene blue group - control state
+
+mb_spz_cont = paste0(
+  df$n[df$Drug == "MB" & df$Exposure == "control"],
+  "/",
+  df$N[df$Drug == "MB" & df$Exposure == "control"],
+  " (",
+  df$Index[df$Drug == "MB" & df$Exposure == "control"],
+  "%)")
+
+# Methylene blue group - treated state
+
+mb_spz_treat = paste0(
+  df$n[df$Drug == "MB" & df$Exposure == "treated"],
+  "/",
+  df$N[df$Drug == "MB" & df$Exposure == "treated"],
+  " (",
+  df$Index[df$Drug == "MB" & df$Exposure == "treated"],
+  "%)")
+
+```
+
+```{r relative_risk_main_text}
+
+# Function to convert odds ratio to relative risk
+
+odds_to_rr = function(p, or){
+  RR = or / (1 - p + (p * or))
+  RR
+}
+
+# Oocyst stage
+
+dat = data.frame(patient=dta_oocysts$patient_id,
+                 batch = dta_oocysts$batch_id,
+                 regimen = dta_oocysts$regimen_id,
+                 treatment = dta_oocysts$drug,
+                 positive = dta_oocysts$y>0,
+                 y = dta_oocysts$y)
+
+dat$patient=as.factor(dat$patient)
+dat$batch=as.factor(dat$batch)
+dat$regimen2=as.factor(dat$regimen*dat$treatment)
+
+# This adjusts for the patient clustering effect
+
+mod = glmer(as.numeric(positive) ~ regimen2 + (1|patient),
+          family = binomial(link = "logit"), data = dat)
+
+# Artesunate
+
+beta.estimate = summary(mod)$coefficients[2,1]
+beta.se = summary(mod)$coefficients[2,2]
+beta.error = 1.96*beta.se + beta.estimate
+beta.lower= beta.estimate - beta.error
+beta.upper = beta.estimate + beta.error
+p.value = round(log10(summary(mod)$coefficient[2,4]), 2)
+
+temp = dat[dat$regimen == 2 & dat$treatment == 0, ]
+p = sum(temp$positive)/length(temp$positive)
+
+rr.estimate = round(odds_to_rr(p=p, or=exp(beta.estimate)), 2)
+rr.lower = round(odds_to_rr(p=p, or=exp(beta.lower)), 2)
+rr.upper = round(odds_to_rr(p=p, or=exp(beta.upper)), 4)
+rr.ci = paste0(rr.estimate, ' [95%CI ', rr.upper, ' to ', rr.lower, '], log10[p-value] = ', p.value)
+rr_as_oo = rr.ci
+
+# Chloroquine
+
+beta.estimate = summary(mod)$coefficients[3,1]
+beta.se = summary(mod)$coefficients[3,2]
+beta.error = 1.96*beta.se + beta.estimate
+beta.lower= beta.estimate - beta.error
+beta.upper = beta.estimate + beta.error
+p.value = round(log10(summary(mod)$coefficient[3,4]), 2)
+
+temp = dat[dat$regimen == 2 & dat$treatment == 0, ]
+p = sum(temp$positive)/length(temp$positive)
+
+rr.estimate = round(odds_to_rr(p=p, or=exp(beta.estimate)), 2)
+rr.lower = round(odds_to_rr(p=p, or=exp(beta.lower)), 2)
+rr.upper = round(odds_to_rr(p=p, or=exp(beta.upper)), 2)
+rr.ci = paste0(rr.estimate, ' [95%CI ', rr.upper, ' to ', rr.lower, '], log10[p-value] = ', p.value)
+rr_cq_oo = rr.ci
+
+# Methylene blue
+
+beta.estimate = summary(mod)$coefficients[4,1]
+beta.se = summary(mod)$coefficients[4,2]
+beta.error = 1.96*beta.se + beta.estimate
+beta.lower= beta.estimate - beta.error
+beta.upper = beta.estimate + beta.error
+p.value = round(log10(summary(mod)$coefficient[4,4]), 2)
+
+temp = dat[dat$regimen == 2 & dat$treatment == 0, ]
+p = sum(temp$positive)/length(temp$positive)
+
+rr.estimate = round(odds_to_rr(p=p, or=exp(beta.estimate)), 3)
+rr.lower = round(odds_to_rr(p=p, or=exp(beta.lower)), 2)
+rr.upper = round(odds_to_rr(p=p, or=exp(beta.upper)), 4)
+rr.ci = paste0(rr.estimate, ' [95%CI ', rr.upper, ' to ', rr.lower, '], log10[p-value] = ', p.value)
+rr_mb_oo = rr.ci
+
+# Sporozoite stage
+
+dat = data.frame(patient=dta_sporozoites$patient_id,
+                 batch = dta_sporozoites$batch_id,
+                 regimen = dta_sporozoites$regimen_id,
+                 treatment = dta_sporozoites$drug,
+                 positive = dta_sporozoites$y>0,
+                 y = dta_sporozoites$y)
+
+dat$patient=as.factor(dat$patient)
+dat$batch=as.factor(dat$batch)
+dat$regimen2=as.factor(dat$regimen*dat$treatment)
+
+# This adjusts for the patient clustering effect
+
+mod = glmer(as.numeric(positive) ~ regimen2 + (1|patient),
+          family = binomial(link = "logit"), data = dat)
+
+# Artesunate
+
+beta.estimate = summary(mod)$coefficients[2,1]
+beta.se = summary(mod)$coefficients[2,2]
+beta.error = 1.96*beta.se + beta.estimate
+beta.lower= beta.estimate - beta.error
+beta.upper = beta.estimate + beta.error
+p.value = round(log10(summary(mod)$coefficient[2,4]), 2)
+
+temp = dat[dat$regimen == 2 & dat$treatment == 0, ]
+p = sum(temp$positive)/length(temp$positive)
+
+rr.estimate = round(odds_to_rr(p=p, or=exp(beta.estimate)), 4)
+rr.lower = round(odds_to_rr(p=p, or=exp(beta.lower)), 2)
+rr.upper = round(odds_to_rr(p=p, or=exp(beta.upper)), 4)
+rr.ci = paste0(rr.estimate, ' [95%CI ', rr.upper, ' to ', rr.lower, '], log10[p-value] = ', p.value)
+rr_as_sp = rr.ci
+
+# Chloroquine
+
+beta.estimate = summary(mod)$coefficients[3,1]
+beta.se = summary(mod)$coefficients[3,2]
+beta.error = 1.96*beta.se + beta.estimate
+beta.lower= beta.estimate - beta.error
+beta.upper = beta.estimate + beta.error
+p.value = round(log10(summary(mod)$coefficient[3,4]), 2)
+
+temp = dat[dat$regimen == 2 & dat$treatment == 0, ]
+p = sum(temp$positive)/length(temp$positive)
+
+rr.estimate = round(odds_to_rr(p=p, or=exp(beta.estimate)), 2)
+rr.lower = round(odds_to_rr(p=p, or=exp(beta.lower)), 2)
+rr.upper = round(odds_to_rr(p=p, or=exp(beta.upper)), 2)
+rr.ci = paste0(rr.estimate, ' [95%CI ', rr.upper, ' to ', rr.lower, '], log10[p-value] = ', p.value)
+rr_cq_sp = rr.ci
+
+# Methylene blue
+
+beta.estimate = summary(mod)$coefficients[4,1]
+beta.se = summary(mod)$coefficients[4,2]
+beta.error = 1.96*beta.se + beta.estimate
+beta.lower= beta.estimate - beta.error
+beta.upper = beta.estimate + beta.error
+p.value = round(log10(summary(mod)$coefficient[4,4]), 2)
+
+temp = dat[dat$regimen == 2 & dat$treatment == 0, ]
+p = sum(temp$positive)/length(temp$positive)
+
+rr.estimate = round(odds_to_rr(p=p, or=exp(beta.estimate)), 4)
+rr.lower = round(odds_to_rr(p=p, or=exp(beta.lower)), 2)
+rr.upper = round(odds_to_rr(p=p, or=exp(beta.upper)), 5)
+rr.ci = paste0(rr.estimate, ' [95%CI ', rr.upper, ' to ', rr.lower, '], log10[p-value] = ', p.value)
+rr_mb_sp = rr.ci
+
+```
+
+Chloroquine exhibited little transmission-blocking activity on P. vivax gametocyte transmission, despite the high concentrations used (Figure 1). Of all dissected mosquitoes in the chloroquine spiked samples, `r cq_ooc_treat` carried oocysts in the treated replicates compared with `r cq_ooc_cont` in the controls (relative risk, RR: `r rr_cq_oo`), and `r cq_spz_treat` carried sporozoites in the treated replicates compared with `r cq_spz_cont` in the controls (RR: `r rr_cq_sp`). In contrast, artesunate and methylene blue almost completely interrupted gametocyte transmission. For artesunate, only `r as_ooc_treat` of the mosquitoes carried oocysts in the treated replicates compared with `r as_ooc_cont` in the controls (RR: `r rr_as_oo`) and `r as_spz_treat` dissected mosquitoes carried sporozoites in the treated replicates versus `r as_spz_cont` in the controls (RR: `r rr_as_sp`); for methylene blue, only `r mb_ooc_treat` carried oocysts in the treated replicates versus `r mb_ooc_cont` in the controls (RR: `r rr_mb_oo`) and only `r mb_spz_treat` carried sporozoites in the treated replicates versus `r mb_spz_cont` in the controls (RR: `r rr_mb_sp`).
+
+```{r figure_drug_effect}
+
+# Graphical parameters
+
+par(mfrow = c(4,3), las=1, font.lab = 2, family='Times New Roman')
+
+# Oocyst panel
+
+# Plot data
+
+dat = data.frame(
+  patient = dta_oocysts$patient_id,
+  regimen = dta_oocysts$regimen_id,
+  drug = dta_oocysts$drug,
+  positive = dta_oocysts$y >0,
+  y = dta_oocysts$y
+)
+
+# Parasite count
+
+# Loop over group allocation
+
+for (i in 1:3) {
+
+  # Aggregate the data
+
+  dat_agg = aggregate(
+    y ~ patient + regimen + drug,
+    FUN = function(x)log10(median(x)),
+    data = dat[dat$regimen == i, ]
+  )
+
+  # Transform infinite values
+
+  dat_agg$y[dat_agg$y == -Inf] = -1
+
+  # Make an empty plot
+
+  plot(NULL, xlab="", ylab="", xaxt="n", yaxt="n", xlim=c(-0.2, 1.2), ylim=c(-1, 3),  panel.first=grid())
+
+  # Add axis
+
+  axis(side = 1, at = 0:1, labels = c('Control','Treated'))
+  axis(side = 2, at = seq(from = -1, to = 3, by = 1), labels = c(0,1,10,"10^2","10^3"))
+  axis.break(2,-0.5)
+
+  title(ylab = 'Median oocyst count')
+  title(xlab = 'Exposure')
+
+  # Add main title
+
+  if (i == 1) {title(main = 'Artesunate')}
+  if (i == 2) {title(main = 'Chloroquine')}
+  if (i == 3) {title(main = 'Methylene blue')}
+
+  # Add points
+
+  points(dat_agg$y[dat_agg$regimen == i] ~ dat_agg$drug[dat_agg$regimen == i])
+
+  # Add connecting lines
+
+  segments(x0 = 0, y0 = dat_agg$y[dat_agg$drug == 0], x1 = 1, y1 = dat_agg$y[dat_agg$drug == 1])
+
+}
+
+# Prevalence
+
+# Loop over group allocation
+
+for (i in 1:3) {
+
+  # Aggregate the data
+
+  dat_agg = aggregate(
+
+    positive ~ patient + regimen + drug,
+    FUN = function(x)mean(x>0),
+    data = dat[dat$regimen == i, ]
+
+  )
+
+  # Make an empty plot
+
+  plot(NULL, xlab="", ylab="", xaxt="n", yaxt="n", xlim=c(-0.2, 1.2), ylim=c(0, 1),  panel.first=grid())
+
+  # Add axis
+
+  axis(side = 1, at = 0:1, labels = c('Control','Treated'))
+  axis(side = 2, at = seq(0,1,0.2), labels = seq(0,1,0.2))
+
+  title(ylab = 'Oocyst index')
+  title(xlab = 'Exposure')
+
+  # Add main title
+
+  if (i == 1) {title(main = 'Artesunate')}
+  if (i == 2) {title(main = 'Chloroquine')}
+  if (i == 3) {title(main = 'Methylene blue')}
+
+  # Add points
+
+  points(dat_agg$positive[dat_agg$regimen == i] ~ dat_agg$drug[dat_agg$regimen == i])
+
+  # Add connecting lines
+
+  segments(x0 = 0, y0 = dat_agg$positive[dat_agg$drug == 0], x1 = 1, y1 = dat_agg$positive[dat_agg$drug == 1])
+
+}
+
+# Sporozoite panel
+
+# Plot data
+
+dat = data.frame(
+  patient = dta_sporozoites$patient_id,
+  regimen = dta_sporozoites$regimen_id,
+  drug = dta_sporozoites$drug,
+  positive = dta_sporozoites$y >0,
+  y = dta_sporozoites$y
+)
+
+# Parasite count
+
+# Loop over group allocation
+
+for (i in 1:3) {
+
+  # Aggregate the data
+
+  dat_agg = aggregate(
+    y ~ patient + regimen + drug,
+    FUN = function(x)log10(median(x)),
+    data = dat[dat$regimen == i, ]
+  )
+
+  # Transform infinite values
+
+  dat_agg$y[dat_agg$y == -Inf] = 0
+
+  # Make an empty plot
+
+  plot(NULL, xlab="", ylab="", xaxt="n", yaxt="n", xlim=c(-0.2, 1.2), ylim=c(0, 5),  panel.first=grid())
+
+  # Add axis
+
+  axis(side = 1, at = 0:1, labels = c('Control','Treated'))
+  axis(side = 2, at = seq(from = 0, to = 5, by = 1), labels = c("0","10","10^2","10^3","10^4","10^5"))
+  axis.break(2,0.5)
+
+  title(ylab = 'Median sporozoite count')
+  title(xlab = 'Exposure')
+
+  # Add main title
+
+  if (i == 1) {title(main = 'Artesunate')}
+  if (i == 2) {title(main = 'Chloroquine')}
+  if (i == 3) {title(main = 'Methylene blue')}
+
+  # Add points
+
+  points(dat_agg$y[dat_agg$regimen == i] ~ dat_agg$drug[dat_agg$regimen == i])
+
+  # Add connecting line
+
+  segments(x0 = 0, y0 = dat_agg$y[dat_agg$drug == 0], x1 = 1, y1 = dat_agg$y[dat_agg$drug == 1])
+}
+
+# Prevalence
+
+# Loop over group allocation
+
+for (i in 1:3) {
+
+  # Aggregate the data
+
+  dat_agg = aggregate(
+    positive ~ patient + regimen + drug,
+    FUN = function(x)mean(x>0),
+    data = dat[dat$regimen == i, ]
+  )
+
+  # Make an empty plot
+
+  plot(NULL, xlab="", ylab="", xaxt="n", yaxt="n", xlim=c(-0.2, 1.2), ylim=c(0, 1),  panel.first=grid())
+
+  # Add axis
+
+  axis(side = 1, at = 0:1, labels = c('Control','Treated'))
+  axis(side = 2, at = seq(0,1,0.2), labels = seq(0,1,0.2))
+
+  title(ylab = 'Sporozoite index')
+  title(xlab = 'Exposure')
+
+  # Add main title
+
+  if (i == 1) {title(main = 'Artesunate')}
+  if (i == 2) {title(main = 'Chloroquine')}
+  if (i == 3) {title(main = 'Methylene blue')}
+
+  # Add points
+
+  points(dat_agg$positive[dat_agg$regimen == i] ~ dat_agg$drug[dat_agg$regimen == i])
+
+  # Add connecting lines
+
+  segments(x0 = 0, y0 = dat_agg$positive[dat_agg$drug == 0], x1 = 1, y1 = dat_agg$positive[dat_agg$drug == 1])
+
+}
+
+# Add panel labels
+
+mtext('A', side = 3, line = -2, adj = 0, outer = TRUE, font = 2)
+mtext('B', side = 3, line = -2, adj = 0.34, outer = TRUE, font = 2)
+mtext('C', side = 3, line = -2, adj = 0.68, outer = TRUE, font = 2)
+
+mtext('D', side = 3, line = -18, adj = 0, outer = TRUE, font = 2)
+mtext('E', side = 3, line = -18, adj = 0.34, outer = TRUE, font = 2)
+mtext('F', side = 3, line = -18, adj = 0.68, outer = TRUE, font = 2)
+
+mtext('G', side = 3, line = -32, adj = 0, outer = TRUE, font = 2)
+mtext('H', side = 3, line = -32, adj = 0.34, outer = TRUE, font = 2)
+mtext('I', side = 3, line = -32, adj = 0.68, outer = TRUE, font = 2)
+
+mtext('J', side = 3, line = -48, adj = 0, outer = TRUE, font = 2)
+mtext('K', side = 3, line = -48, adj = 0.34, outer = TRUE, font = 2)
+mtext('L', side = 3, line = -48, adj = 0.68, outer = TRUE, font = 2)
+
+```
+
+# Look at model coefficient etimates
+
+As observed previously, there was considerable heterogeneity in the count data across mosquitos and a considerable variability in the count data across blood samples and experimental batches. To account for this heterogeneity and variability, we estimated the drug effects under a Bayesian hierarchical model (mixed effects) whereby the count data are modelled as negative binomial with the dispersion parameter as a parametric function of the mean count (Table 2; see Methods) (20). In contrast to the previous data describing proportions of mosquitos with parasites, the model parameterizes the drug effect as a reduction in the mean number of parasites per mosquito, accounting for variability across blood samples and mosquito batches.
+
+```{r table_model_coefficients}
+
+# List parameters of interest
+
+ls_pars = c('mu_log_population', 'sigma_patient', 'sigma_batch', 'a0_log', 'a1_log', 'beta_drug[1]','beta_drug[2]','beta_drug[3]', 'beta_covs[1]', 'beta_covs[2]', 'beta_covs[3]', 'art_wash')
+
+# Oocyst stage
+
+# Extract model estimates
+
+df = as.data.frame(out_oocyst)
+my_res = as.data.frame(apply(df[, ls_pars], 2, quantile, probs = c(0.5,0.025,0.975)))
+
+# Make an output table
+
+my_out = as.data.frame(rbind(
+
+  mu_population = round(exp(my_res$mu_log_population),1),
+
+  sigma_patient = round(my_res$sigma_patient,2),
+  sigma_batch = round(my_res$sigma_batch,2),
+
+  a0 = round(exp(my_res$a0_log),4),
+  a1 = round(exp(my_res$a1_log),4),
+
+  artesunate_effect = round(exp(my_res$`beta_drug[1]`),4),
+  chloroquine_effect = round(exp(my_res$`beta_drug[2]`),4),
+  methylene_blue_effect = round(exp(my_res$`beta_drug[3]`),4),
+
+  baseline_oocyst_count = round(exp(my_res$`beta_covs[1]`),1),
+  baseline_parasitemia = round(exp(my_res$`beta_covs[2]`),1),
+  baseline_gametocytemia = round(exp(my_res$`beta_covs[3]`),1),
+  wash = round(exp(my_res$art_wash),1)))
+
+# Rename variables
+
+names(my_out) = c("Median", "Lower", "Upper")
+
+# Add credible interval
+
+my_out$CI = paste(my_out$Lower, my_out$Upper, sep = " to ")
+# my_out$CI[grepl("effect", row.names(my_out))] = paste(my_out$Upper[grepl("effect", row.names(my_out))], my_out$Lower[grepl("effect", row.names(my_out))], sep = " to ")
+
+# Select variables
+
+my_out = my_out[,c("Median", "CI")]
+
+# Rename variables
+
+names(my_out) = c("Oocyst_Median", "Oocyst_CI")
+
+# Keep output for merging of oocsyst and sporozoite data
+
+my_out1 = my_out
+
+# Sporozoite stage
+
+# Extract model estimates
+
+df = as.data.frame(out_sporozoite)
+my_res = as.data.frame(apply(df[, ls_pars], 2, quantile, probs = c(0.5,0.025,0.975)))
+
+# Make an output table
+
+my_out = as.data.frame(rbind(
+
+  mu_population = round(exp(my_res$mu_log_population),1),
+
+  sigma_patient = round(my_res$sigma_patient,2),
+  sigma_batch = round(my_res$sigma_batch,2),
+
+  a0 = round(exp(my_res$a0_log),4),
+  a1 = round(exp(my_res$a1_log),4),
+
+  artesunate_effect = round(exp(my_res$`beta_drug[1]`),4),
+  chloroquine_effect = round(exp(my_res$`beta_drug[2]`),4),
+  methylene_blue_effect = round(exp(my_res$`beta_drug[3]`),4),
+
+  baseline_oocyst_count = round(exp(my_res$`beta_covs[1]`),1),
+  baseline_parasitemia = round(exp(my_res$`beta_covs[2]`),1),
+  baseline_gametocytemia = round(exp(my_res$`beta_covs[3]`),1),
+  wash = round(exp(my_res$art_wash),1)))
+
+# Rename variables
+
+names(my_out) = c("Median", "Lower", "Upper")
+
+# Add credible interval
+
+my_out$CI = paste(my_out$Lower, my_out$Upper, sep = " to ")
+# my_out$CI[grepl("effect", row.names(my_out))] = paste(my_out$Upper[grepl("effect", row.names(my_out))], my_out$Lower[grepl("effect", row.names(my_out))], sep = " to ")
+
+# Select variables
+
+my_out = my_out[,c("Median", "CI")]
+
+# Rename variables
+
+names(my_out) = c("Sporozoite_Median", "Sporozoite_CI")
+
+# Keep output for merging of oocsyst and sporozoite data
+
+my_out2 = my_out
+
+# Merged table
+
+# Merge oocyst and sporozoite tables
+
+my_out = cbind(my_out1, my_out2)
+
+# Save table
+
+write.csv(my_out, file = 'tables/model_coefficients.csv')
+
+# Display table in the output document
+
+knitr::kable(my_out, caption = "Parameter estimates given by the output of transmission-blocking activity model fitted to oocyst and sporozoite data")
+
+```
+```{r drug_effect_main_text2}
+
+ls_pars = c('beta_drug[1]','beta_drug[2]','beta_drug[3]')
+
+# Oocyst stage
+
+df = as.data.frame(out_oocyst)
+my_res = as.data.frame(apply(df[, ls_pars], 2, quantile, probs = c(0.5,0.025,0.975)))
+
+## Artesunate
+
+beta_artesunate_oocyst = as.character(round(1/exp(my_res$`beta_drug[1]`[1]),2))
+beta_artesunate_oocyst_lower = as.character(round(1/exp(my_res$`beta_drug[1]`[2]),2))
+beta_artesunate_oocyst_upper = as.character(round(1/exp(my_res$`beta_drug[1]`[3]),2))
+
+## Chloroquine
+
+beta_chloroquine_oocyst = as.character(round(1/exp(my_res$`beta_drug[2]`[1]),2))
+beta_chloroquine_oocyst_lower = as.character(round(1/exp(my_res$`beta_drug[2]`[2]),2))
+beta_chloroquine_oocyst_upper = as.character(round(1/exp(my_res$`beta_drug[2]`[3]),2))
+
+## Methylene blue
+
+beta_methylene_blue_oocyst = as.character(round(1/exp(my_res$`beta_drug[3]`[1]),2))
+beta_methylene_blue_oocyst_lower = as.character(round(1/exp(my_res$`beta_drug[3]`[2]),2))
+beta_methylene_blue_oocyst_upper = as.character(round(1/exp(my_res$`beta_drug[3]`[3]),2))
+
+# Sporozoite stage
+
+df = as.data.frame(out_sporozoite)
+my_res = as.data.frame(apply(df[, ls_pars], 2, quantile, probs = c(0.5,0.025,0.975)))
+
+## Artesunate
+
+beta_artesunate_sporozoite = as.character(round(1/exp(my_res$`beta_drug[1]`[1]),2))
+beta_artesunate_sporozoite_lower = as.character(round(1/exp(my_res$`beta_drug[1]`[2]),2))
+beta_artesunate_sporozoite_upper = as.character(round(1/exp(my_res$`beta_drug[1]`[3]),2))
+
+## Chloroquine
+
+beta_chloroquine_sporozoite = as.character(round(1/exp(my_res$`beta_drug[2]`[1]),2))
+beta_chloroquine_sporozoite_lower = as.character(round(1/exp(my_res$`beta_drug[2]`[2]),2))
+beta_chloroquine_sporozoite_upper = as.character(round(1/exp(my_res$`beta_drug[2]`[3]),2))
+
+## Methylene blue
+
+beta_methylene_blue_sporozoite = as.character(round(1/exp(my_res$`beta_drug[3]`[1]),2))
+beta_methylene_blue_sporozoite_lower = as.character(round(1/exp(my_res$`beta_drug[3]`[2]),2))
+beta_methylene_blue_sporozoite_upper = as.character(round(1/exp(my_res$`beta_drug[3]`[3]),2))
+
+```
+
+```{r observed_effefct_main_text}
+
+# Mean values control vs teated
+
+# Oocyst
+
+dta = dta_oocysts
+
+df = 
+  data.frame(
+    regimen = dta$regimen_id,
+    exposure = dta$drug,
+    y = dta$y
+    )
+  
+dta_agg = 
+  aggregate(
+    y ~ regimen + exposure,
+    data = df,
+    FUN = function(x) round(mean(x),2))
+
+mean_oocyst_count_as_control = dta_agg$y[dta_agg$regimen == 1 & dta_agg$exposure == 0]
+mean_oocyst_count_as_treated = dta_agg$y[dta_agg$regimen == 1 & dta_agg$exposure == 1]
+
+mean_oocyst_count_cq_control = dta_agg$y[dta_agg$regimen == 2 & dta_agg$exposure == 0]
+mean_oocyst_count_cq_treated = dta_agg$y[dta_agg$regimen == 2 & dta_agg$exposure == 1]
+
+mean_oocyst_count_mb_control = dta_agg$y[dta_agg$regimen == 3 & dta_agg$exposure == 0]
+mean_oocyst_count_mb_treated = dta_agg$y[dta_agg$regimen == 3 & dta_agg$exposure == 1]
+
+# Sporozoite
+
+dta = dta_sporozoites
+
+df = 
+  data.frame(
+    regimen = dta$regimen_id,
+    exposure = dta$drug,
+    y = dta$y
+    )
+  
+dta_agg = 
+  aggregate(
+    y ~ regimen + exposure,
+    data = df,
+    FUN = function(x) as.character(round(mean(x),1)))
+
+mean_sporozoite_count_as_control = dta_agg$y[dta_agg$regimen == 1 & dta_agg$exposure == 0]
+mean_sporozoite_count_as_treated = dta_agg$y[dta_agg$regimen == 1 & dta_agg$exposure == 1]
+
+mean_sporozoite_count_cq_control = dta_agg$y[dta_agg$regimen == 2 & dta_agg$exposure == 0]
+mean_sporozoite_count_cq_treated = dta_agg$y[dta_agg$regimen == 2 & dta_agg$exposure == 1]
+
+mean_sporozoite_count_mb_control = dta_agg$y[dta_agg$regimen == 3 & dta_agg$exposure == 0]
+mean_sporozoite_count_mb_treated = dta_agg$y[dta_agg$regimen == 3 & dta_agg$exposure == 1]
+
+```
+
+Under the model, gametocyte exposure to chloroquine decreased the mean oocyst count `r beta_chloroquine_oocyst`-fold [95% credible interval [CrI]: `r beta_chloroquine_oocyst_lower` to `r beta_chloroquine_oocyst_upper`-fold] (from `r mean_oocyst_count_cq_control` to `r mean_oocyst_count_cq_treated` oocysts per mosquito in the controls and treated replicates, respectively) and the mean sporozoite count `r beta_chloroquine_sporozoite`-fold [95%CrI `r beta_chloroquine_sporozoite_lower` to `r beta_chloroquine_sporozoite_upper`-fold] (from `r mean_sporozoite_count_cq_control` to `r mean_sporozoite_count_cq_treated` sporozoites per mosquito in the controls and treated replicates, respectively). The corresponding figures for artesunate and methylene blue were a `r beta_artesunate_oocyst`-fold reduction [95%CrI `r beta_artesunate_oocyst_lower` to `r beta_artesunate_oocyst_upper`-fold] (from `r mean_oocyst_count_as_control` to `r mean_oocyst_count_as_treated` oocysts per mosquito in the controls and treated replicates, respectively) and a `r beta_methylene_blue_oocyst`-fold reduction [95%CI `r beta_methylene_blue_oocyst_lower` to `r beta_methylene_blue_oocyst_upper`-fold] (from `r mean_oocyst_count_mb_control` to `r mean_oocyst_count_mb_treated` oocysts per mosquito in the controls and treated replicates, respectively) in oocyst count respectively and a `r beta_artesunate_sporozoite`-fold [95%CrI `r beta_artesunate_sporozoite_lower` to `r beta_artesunate_sporozoite_upper`-fold] (from `r mean_sporozoite_count_as_control` to `r mean_sporozoite_count_as_treated` sporozoites per mosquito in the controls and treated replicates, respectively) and a `r beta_methylene_blue_sporozoite`-fold [95%CrI `r beta_methylene_blue_sporozoite_lower` to `r beta_methylene_blue_sporozoite_upper`-fold] (from `r mean_sporozoite_count_mb_control` to `r mean_sporozoite_count_mb_treated` sporozoites per mosquito in the controls and treated replicates, respectively) reduction in sporozoite count, respectively.
+
+```{r covariables_main_text}
+
+ls_pars = c('beta_covs[1]', 'beta_covs[2]', 'beta_covs[3]', 'art_wash')
+
+# Oocyst stage
+
+df = as.data.frame(out_oocyst)
+my_res = as.data.frame(apply(df[, ls_pars], 2, quantile, probs = c(0.5,0.025,0.975)))
+
+## Baseline oocyst count
+
+beta_cov1_oocyst = round(exp(my_res$`beta_covs[1]`[1]),2)
+beta_cov1_oocyst_lower = round(exp(my_res$`beta_covs[1]`[2]),2)
+beta_cov1_oocyst_upper = round(exp(my_res$`beta_covs[1]`[3]),2)
+
+## Baseline asexual parasitaemia
+
+beta_cov2_oocyst = round(exp(my_res$`beta_covs[2]`[1]),2)
+beta_cov2_oocyst_lower = round(exp(my_res$`beta_covs[2]`[2]),2)
+beta_cov2_oocyst_upper = round(exp(my_res$`beta_covs[2]`[3]),2)
+
+## Baseline gametocytaemia
+
+beta_cov3_oocyst = round(exp(my_res$`beta_covs[3]`[1]),2)
+beta_cov3_oocyst_lower = round(exp(my_res$`beta_covs[3]`[2]),2)
+beta_cov3_oocyst_upper = round(exp(my_res$`beta_covs[3]`[3]),2)
+
+## Artesunate wash off
+
+beta_art_oocyst = round(exp(my_res$art_wash[1]),2)
+beta_art_oocyst_lower = round(exp(my_res$art_wash[2]),2)
+beta_art_oocyst_upper = round(exp(my_res$art_wash[3]),2)
+
+# Sporozoite stage
+
+df = as.data.frame(out_sporozoite)
+my_res = as.data.frame(apply(df[, ls_pars], 2, quantile, probs = c(0.5,0.025,0.975)))
+
+## Baseline oocyst count
+
+beta_cov1_sporozoite = round(exp(my_res$`beta_covs[1]`[1]),2)
+beta_cov1_sporozoite_lower = round(exp(my_res$`beta_covs[1]`[2]),2)
+beta_cov1_sporozoite_upper = round(exp(my_res$`beta_covs[1]`[3]),2)
+
+## Baseline asexual parasitaemia
+
+beta_cov2_sporozoite = round(exp(my_res$`beta_covs[2]`[1]),2)
+beta_cov2_sporozoite_lower = round(exp(my_res$`beta_covs[2]`[2]),2)
+beta_cov2_sporozoite_upper = round(exp(my_res$`beta_covs[2]`[3]),2)
+
+## Baseline gametocytaemia
+
+beta_cov3_sporozoite = round(exp(my_res$`beta_covs[3]`[1]),2)
+beta_cov3_sporozoite_lower = round(exp(my_res$`beta_covs[3]`[2]),2)
+beta_cov3_sporozoite_upper = round(exp(my_res$`beta_covs[3]`[3]),2)
+
+## Artesunate wash off
+
+beta_art_sporozoite = round(exp(my_res$art_wash[1]),2)
+beta_art_sporozoite_lower = round(exp(my_res$art_wash[2]),2)
+beta_art_sporozoite_upper = round(exp(my_res$art_wash[3]),2)
+
+```
+
+To consider baseline variations in blood meal infectiousness to mosquitoes across blood samples, the log10[oocyst count], log10[asexual parasitaemia] and log10[gametocytaemia] assessed on admission (i.e., on the collection day before the 24-hour incubation time with or without drug) were introduced as linear predictors of the mean parasite count in mosquito samples of the experimental replicates (i.e. after 24 hours of incubation with or without drug). A 10-fold increase in the mean oocyst count and gametocytaemia at baseline were respectively associated with a `r beta_cov1_oocyst` [95%CI: `r beta_cov1_oocyst_lower` to `r beta_cov1_oocyst_upper`] and a `r beta_cov3_oocyst`-fold increase [95%CI: `r beta_cov3_oocyst_lower` to `r beta_cov3_oocyst_upper`] in the mean oocyst count in the experimental replicates;  there was no significant association between the mean oocyst count in experimental replicate and baseline asexual parasitaemia (model coefficient: `r beta_cov2_oocyst` [95%CI `r beta_cov2_oocyst_lower` to `r beta_cov2_oocyst_upper`]) or artesunate wash off (model coefficient: `r beta_art_oocyst` [95%CI `r beta_art_oocyst_lower` to `r beta_art_oocyst_upper`]).  A 10-fold increase in baseline gametocytaemia and artesunate wash off were respectively associated with a `r beta_cov3_sporozoite`-fold increase [95%CI `r beta_cov3_sporozoite_lower` to `r beta_cov3_sporozoite_upper`] and a `r beta_art_sporozoite`-fold decrease [95%CI `r beta_art_sporozoite_lower` to `r beta_art_sporozoite_upper`] in the mean sporozoite count in the experimental replicates;  there was no significant association between the mean sporozoite count in the experimental replicate and mean oocyst count (model coefficient: `r beta_cov1_sporozoite` [95%CI `r beta_cov1_sporozoite_lower` to `r beta_cov1_sporozoite_upper`]) or asexual parasitaemia (model coefficient: `r beta_cov2_sporozoite` [95%CI `r beta_cov2_sporozoite_lower` to `r beta_cov2_sporozoite_upper`]) at baseline.
+
+# Assay variability
+
+## Inter-experiment variability
+
+```{r inter_experiment_variability}
+
+# Prepare plot data
+
+# Oocyst
+
+temp1 = as.data.frame(out_oocyst)
+temp1 = temp1[, grepl("mu_log_patient", names(temp1))]
+temp1 = as.data.frame(
+  cbind(names(apply(temp1, 2, quantile, probs = .5)),
+        apply(temp1, 2, quantile, probs = .5),
+        apply(temp1, 2, quantile, probs = .025),
+        apply(temp1, 2, quantile, probs = .975)),
+  row.names = F)
+names(temp1) = c("sample.id", "median", "lower", "upper")
+temp1$median = exp(as.numeric(temp1$median))
+temp1$lower = exp(as.numeric(temp1$lower))
+temp1$upper = exp(as.numeric(temp1$upper))
+temp1$sample.id = sub("mu_log_patient\\[", "", temp1$sample.id)
+temp1$sample.id = sub("]", "", temp1$sample.id)
+temp1$experiment.tag = dtsOocysts$ExperimentTag[match(temp1$sample.id, as.integer(factor(dtsOocysts$ExperimentTag)))]
+
+# Sporozoite
+
+temp2 = as.data.frame(out_sporozoite)
+temp2 = temp2[, grepl("mu_log_patient", names(temp2))]
+temp2 = as.data.frame(
+  cbind(names(apply(temp2, 2, quantile, probs = .5)),
+        apply(temp2, 2, quantile, probs = .5),
+        apply(temp2, 2, quantile, probs = .025),
+        apply(temp2, 2, quantile, probs = .975)),
+  row.names = F)
+names(temp2) = c("sample.id", "median", "lower", "upper")
+temp2$median = exp(as.numeric(temp2$median))
+temp2$lower = exp(as.numeric(temp2$lower))
+temp2$upper = exp(as.numeric(temp2$upper))
+temp2$sample.id = sub("mu_log_patient\\[", "", temp2$sample.id)
+temp2$sample.id = sub("]", "", temp2$sample.id)
+temp2$experiment.tag = dtsSporozoites$ExperimentTag[match(temp2$sample.id, as.integer(factor(dtsSporozoites$ExperimentTag)))]
+temp2 = temp2[order(as.integer(sub("PVTBA", "", temp2$experiment.tag))), ]
+
+# Merge oocsyt and sporozoite data
+
+my_table = merge.data.frame(temp1, temp2, by = 'experiment.tag', all = T, suffixes = c('.oocyst', '.sporozoite'))
+my_table = my_table[order(as.integer(sub("PVTBA", "", my_table$experiment.tag))), ]
+my_table$sample.id = 1:nrow(my_table)
+my_table$drug[my_table$experiment.tag %in% ls_as] = 1
+my_table$drug[my_table$experiment.tag %in% ls_cq] = 2
+my_table$drug[my_table$experiment.tag %in% ls_mb] = 3
+my_table$median.oocyst.log10 = log10(my_table$median.oocyst)
+my_table$lower.oocyst.log10 = log10(my_table$lower.oocyst)
+my_table$upper.oocyst.log10 = log10(my_table$upper.oocyst)
+my_table$median.sporozoite.log10 = log10(my_table$median.sporozoite)
+my_table$lower.sporozoite.log10 = log10(my_table$lower.sporozoite)
+my_table$upper.sporozoite.log10 = log10(my_table$upper.sporozoite)
+
+# Graphical parameters
+
+par(mfrow = c(2,1), mar = c(5, 5, 4, 2) + 0.1, las=1, font.lab = 2, family='Times New Roman', cex = 0.8)
+palette(brewer.pal(n = 8, 'Dark2'))
+
+# Oocyst panel
+
+# Make an empty plot
+
+plot(NULL, xlab = NA, ylab = NA, xlim = c(1,38), ylim = c(-2,1), xaxt = 'n', yaxt = 'n', panel.first=grid())
+
+# Add axis
+
+axis(1, at = c(0:38), labels = c(0:38))
+axis(2, at = seq(-2, 1, 1), labels = c(0.1, 0, 1, 10))
+# axis.break(axis=2,-3.5,bgcol="white",breakcol="black", style="slash",brw=0.02)
+title(xlab = 'Assay run')
+title(ylab = 'Fold-variation in the mean oocyst\ncount across blood samples')
+
+# Add data point
+
+points(my_table$sample.id, my_table$median.oocyst.log10, pch = 16, col = my_table$drug)
+arrows(my_table$sample.id, my_table$lower.oocyst.log10, my_table$sample.id, my_table$upper.oocyst.log10, length=0.05, angle=90, code=3, col = my_table$drug)
+
+# Add legend
+
+legend(legend=c("Artesunate", "Chloroquine", "Methylene blue"), pch=16, col = 1:3, 'bottomleft', bty = 'n')
+
+# Sporozoites panel
+
+# Make an empty plot
+
+plot(NULL, xlab = NA, ylab = NA, xlim = c(1,38), ylim = c(-2,2), xaxt = 'n', yaxt = 'n', panel.first=grid())
+
+# Add axis
+
+axis(1, at = c(0:38), labels = c(0:38))
+axis(2, at = seq(-2, 2, 1), labels = c(0.1, 0, 1, 10,100))
+# axis.break(axis=2,-3.5,bgcol="white",breakcol="black", style="slash",brw=0.02)
+title(xlab = 'Assay run')
+title(ylab = 'Fold-variation in the mean sporozoite\ncount across blood samples')
+
+# Add data points
+
+points(my_table$sample.id, my_table$median.sporozoite.log10, pch = 16, col = my_table$drug)
+arrows(my_table$sample.id, my_table$lower.sporozoite.log10, my_table$sample.id, my_table$upper.sporozoite.log10, length=0.05, angle=90, code=3, col = my_table$drug)
+
+# Add legend
+
+legend(legend=c("Artesunate", "Chloroquine", "Methylene blue"), pch=16, col = 1:3, 'bottomleft', bty = 'n')
+
+# Add panel labels
+
+mtext('A', side = 3, line = -3, outer = TRUE, font = 2, cex = 2, adj = 0)
+mtext('B', side = 3, line = -28, outer = TRUE, font = 2, cex = 2, adj = 0)
+
+```
+
+These are the figures for inter-experiment variability (in fold-variation in the mean parasite count across blood samples):
+
+```{r, echo = T}
+quantile(my_table$median.oocyst)
+quantile(my_table$median.sporozoite, na.rm = T)
+```
+
+
+## Intra-experiment variability
+
+```{r intra_experiment_variability}
+
+# Prepare plot data
+
+# Oocysts
+
+# Define batch_id consistent between oocyst and sporozoite panels
+
+dtsOocysts$BatchTag = paste(dtsOocysts$ExperimentTag, dtsOocysts$Condition, sep = "")
+dtsOocysts$BatchID = as.integer(factor(dtsOocysts$BatchTag))
+
+# Subset posterior draws of the batch random effects
+
+temp1 = as.data.frame(out_oocyst)
+temp1 = temp1[, grepl("batch_rand_effect", names(temp1))]
+
+# Extract the median and 95$CrI
+
+temp1 = as.data.frame(
+  cbind(names(apply(temp1, 2, quantile, probs = .5)),
+        apply(temp1, 2, quantile, probs = .5),
+        apply(temp1, 2, quantile, probs = .025),
+        apply(temp1, 2, quantile, probs = .975)),
+  row.names = F)
+
+# Rename variables
+
+names(temp1) = c("batch.id", "median", "lower", "upper")
+
+# These are on the log scale !
+
+temp1$median = exp(as.numeric(temp1$median))
+temp1$lower = exp(as.numeric(temp1$lower))
+temp1$upper = exp(as.numeric(temp1$upper))
+
+# Reformat batch.id
+
+temp1$batch.id = sub("batch_rand_effect\\[", "", temp1$batch.id)
+temp1$batch.id = sub("]", "", temp1$batch.id)
+
+# Add consistent batch and experiment tag between the two panel
+
+temp1$batch.tag = dtsOocysts$BatchTag[match(temp1$batch.id,dtsOocysts$BatchID)]
+temp1$experiment.tag = dtsOocysts$ExperimentTag[match(temp1$batch.tag,dtsOocysts$BatchTag)]
+
+# Sporozoites
+
+# Define batch_id consistent between oocyst and sporozoite panels
+
+dtsSporozoites$BatchTag = paste(dtsSporozoites$ExperimentTag, dtsSporozoites$Condition, sep = "")
+dtsSporozoites$BatchID = as.integer(factor(dtsSporozoites$BatchTag))
+
+# Subset posterior draws of the batch random effects
+
+temp2 = as.data.frame(out_sporozoite)
+temp2 = temp2[, grepl("batch_rand_effect", names(temp2))]
+
+# Extract the median and 95$CrI
+
+temp2 = as.data.frame(
+  cbind(names(apply(temp2, 2, quantile, probs = .5)),
+        apply(temp2, 2, quantile, probs = .5),
+        apply(temp2, 2, quantile, probs = .025),
+        apply(temp2, 2, quantile, probs = .975)),
+  row.names = F)
+
+# Rename variables
+
+names(temp2) = c("batch.id", "median", "lower", "upper")
+
+# These are on the log scale !
+
+temp2$median = exp(as.numeric(temp2$median))
+temp2$lower = exp(as.numeric(temp2$lower))
+temp2$upper = exp(as.numeric(temp2$upper))
+
+# Reformat batch.id
+
+temp2$batch.id = sub("batch_rand_effect\\[", "", temp2$batch.id)
+temp2$batch.id = sub("]", "", temp2$batch.id)
+
+# Add consistent batch and experiment tag between the two panel
+
+temp2$batch.tag = dtsSporozoites$BatchTag[match(temp2$batch.id, as.integer(factor(paste(dtsSporozoites$ExperimentTag, dtsSporozoites$Condition))))]
+temp2$experiment.tag = dtsSporozoites$ExperimentTag[match(temp2$batch.tag,dtsSporozoites$BatchTag)]
+
+# Merge oocyst and sporozoite data
+
+my_table = merge.data.frame(temp1, temp2, by = 'batch.tag', all = T, suffixes = c('.oocyst', '.sporozoite'))
+
+# Reorder table
+
+my_table = my_table[order(as.integer(sub("PVTBA", "", my_table$experiment.tag.oocyst))), ]
+
+# Recode batch.id
+
+my_table$batch.id = 1:nrow(my_table)
+
+# Add variable drug
+
+my_table$drug[my_table$experiment.tag.oocyst %in% ls_as] = 1
+my_table$drug[my_table$experiment.tag.oocyst %in% ls_cq] = 2
+my_table$drug[my_table$experiment.tag.oocyst %in% ls_mb] = 3
+
+# Log-stransform with logarithm base 10
+
+my_table$median.oocyst.log10 = log10(my_table$median.oocyst)
+my_table$lower.oocyst.log10 = log10(my_table$lower.oocyst)
+my_table$upper.oocyst.log10 = log10(my_table$upper.oocyst)
+
+my_table$median.sporozoite.log10 = log10(my_table$median.sporozoite)
+my_table$lower.sporozoite.log10 = log10(my_table$lower.sporozoite)
+my_table$upper.sporozoite.log10 = log10(my_table$upper.sporozoite)
+
+# Set graphical parameters
+
+par(mfrow = c(2,1), mar = c(5, 5, 4, 2) + 0.1, las=1, font.lab = 2, family='Times New Roman', cex = 0.8)
+palette(brewer.pal(n = 8, 'Dark2'))
+
+# Oocyst panel
+
+# Make an empty plot
+
+plot(NULL, xlab = NA, ylab = NA, xlim = c(1,304), ylim = c(-3,1), xaxt = 'n', yaxt = 'n', panel.first=grid())
+
+# Add axis
+
+axis(1, at = c(0:304), labels = c(0:304))
+axis(2, at = seq(-3, 2, 1), labels = c(0.001, 0.01, 0.1, 1, 10, 100))
+
+axis.break(axis=2,-6.5,bgcol="white",breakcol="black", style="slash",brw=0.02)
+
+title(xlab = 'Mosquito batch')
+title(ylab = 'Fold-variation in the mean oocyst\ncount across technical replicates')
+
+# Add data points
+
+points(my_table$batch.id, my_table$median.oocyst.log10, pch = 16, col = my_table$drug)
+arrows(my_table$batch.id, my_table$lower.oocyst.log10, my_table$batch.id, my_table$upper.oocyst.log10, length=0.05, angle=90, code=3, col = my_table$drug)
+
+# Add legend
+
+legend(legend=c("Artesunate", "Chloroquine", "Methylene blue"), pch=16, col = 1:3, 'bottomright', bty = 'n')
+
+# Sporozoite panel
+
+# Make an empty plot
+
+plot(NULL, xlab = NA, ylab = NA, xlim = c(1,304), ylim = c(-1,1), xaxt = 'n', yaxt = 'n', panel.first=grid())
+
+# Add axis
+
+axis(1, at = c(0:304), labels = c(0:304))
+axis(2, at = seq(-1, 1, 1), labels = c(0.1, 1, 10))
+
+# axis.break(axis=2,-6.5,bgcol="white",breakcol="black", style="slash",brw=0.02)
+
+title(xlab = 'Mosquito batch')
+title(ylab = 'Fold-variation in the mean sporozoite\ncount across technical replicates')
+
+# Add data points
+
+points(my_table$batch.id, my_table$median.sporozoite.log10, pch = 16, col = my_table$drug)
+arrows(my_table$batch.id, my_table$lower.sporozoite.log10, my_table$batch.id, my_table$upper.sporozoite.log10, length=0.05, angle=90, code=3, col = my_table$drug)
+
+# Add legend
+
+legend(legend=c("Artesunate", "Chloroquine", "Methylene blue"), pch=16, col = 1:3, 'bottomright', bty = 'n')
+
+# Add panel labels
+
+mtext('A', side = 3, line = -3, outer = TRUE, font = 2, cex = 2, adj = 0)
+mtext('B', side = 3, line = -28, outer = TRUE, font = 2, cex = 2, adj = 0)
+
+```
+
+These are the figures for intra-experiment variability (in fold-variation in the mean parasite count accross technical replicates):
+
+```{r, echo = T}
+quantile(my_table$median.oocyst)
+quantile(my_table$median.sporozoite, na.rm = T)
+```
+
+# Correlation between oocyst and sporozoite count
+
+```{r correlation_oocyst_sporozoite_count}
+
+# Calculate the geometric mean oocyst count for each mosquito batch
+
+gmean_oocyst = with(tblOocysts, tapply(NbOocysts, Tag, function(x)exp(mean(log(x[x>0])))))
+df1 = as.data.frame(cbind(names(gmean_oocyst), gmean_oocyst))
+names(df1) = c("Tag", "Gmean")
+df1$Gmean = as.numeric(df1$Gmean)
+
+# Calculate the geometric mean sporozoite count for each mosquito batch
+
+gmean_sporozoite = with(tblSporozoites, tapply(NbSporozoites2, Tag, function(x)exp(mean(log(x[x>0])))))
+df2 = as.data.frame(cbind(names(gmean_sporozoite), gmean_sporozoite))
+names(df2) = c("Tag", "Gmean")
+df2$Gmean = as.numeric(df2$Gmean)
+
+# Merge oocyst and sporozoite data
+
+df = merge.data.frame(df1, df2, by = "Tag", all = T, suffixes = c(".Oocyst", ".Sporozoite"))
+
+# Remove experiment PVTBA1 (not part of the study design) and baseline data
+
+ss = subset(df, !grepl("PVTBA1_", Tag) & !grepl("QC", Tag) & !is.na(Gmean.Oocyst) & !is.na(Gmean.Sporozoite))
+
+# Observed values
+
+xval = log10(ss$Gmean.Oocyst)
+yval = log10(ss$Gmean.Sporozoite)
+
+# Fit linear regression
+
+my_fit = lm(yval~ xval)
+summary(my_fit)
+
+# Extract fit coefficients
+
+a = coef(my_fit)[2]
+b = coef(my_fit)[1]
+
+# Extract fitted values
+
+xmin = -1
+xmax = 3
+
+fitline_xval =  seq(xmin, xmax, 0.01)
+fitline_yval =  coef(my_fit)[2]*fitline_xval+coef(my_fit)[1]
+
+polygon_xval = seq(xmin, xmax, 0.01)
+polygon_yval_low = confint(my_fit, level=0.95)[2,1] * polygon_xval + confint(my_fit, level=0.95)[1,1]
+polygon_yval_up = confint(my_fit, level=0.95)[2,2] * polygon_xval + confint(my_fit, level=0.95)[1,2]
+
+# Graphical parameters
+
+par(mfrow = c(1,1), las=1, font.lab = 2, family='Times New Roman')
+
+my_cols = brewer.pal(n = 8, 'Dark2')
+
+xmin = 0
+xmax = 3
+xlabs = c(1, 10, 100, 1000)
+ymin = 1
+ymax =  5
+ylabs = c(10, 100, 1000, 10000, 100000)
+
+# Make an empty plot
+
+plot(NULL, xlab = NA, ylab = NA, xlim = c(xmin,xmax), ylim = c(ymin,ymax), xaxt = 'n', yaxt = 'n', pannel.first = grid())
+
+# Add axis
+
+axis(1, at = seq(xmin, xmax, 1), labels = xlabs)
+axis(2, at = seq(ymin, ymax, 1), labels = ylabs)
+
+title(xlab = 'Geometric mean oocyst count')
+title(ylab = 'Geometric mean sporozoite count')
+
+# Add data points
+
+points(xval, yval, pch = 16, col = alpha('black', 0.5))
+
+# Add fitted relationship
+
+lines(fitline_xval, fitline_yval, lwd=2, col = my_cols[2])
+polygon(x = c(polygon_xval, rev(polygon_xval)), y = c(polygon_yval_up, rev(polygon_yval_low)), lwd=2, col = alpha( my_cols[2], 0.3), border = NA)
+
+```
+
+The fit line equation is y = `r a`*x + `r b`.
+
+# Model assesment
+
+## Traceplots
+
+### Oocyst stage
+
+```{r traceplot_oocyst}
+
+ls_pars = c("mu_log_population", "sigma_patient", "sigma_batch", "a0_log", "a1_log", "beta_covs", "art_wash", "beta_drug")
+
+traceplot(out_oocyst, pars = ls_pars, inc_warmup=T)
+
+```
+
+### Sporozoite stage
+
+```{r traceplot_sporozoite}
+
+ls_pars = c("mu_log_population", "sigma_patient", "sigma_batch", "a0_log", "a1_log", "beta_covs", "art_wash", "beta_drug")
+
+traceplot(out_sporozoite, pars = ls_pars, inc_warmup=T)
+
+```
+
+
+## Comparison of priors and posteriors
+
+### Oocyst stage
+
+```{r prior_posterior_oocysts}
+
+# Extract posterior draws
+
+my_thetas = rstan::extract(out_oocyst)
+
+# Graphical parameters
+
+par(mfrow = c(5,3), las=1, font.lab = 2, family='Times New Roman')
+
+# mu_log_population
+
+## Plot data
+
+my_par = "mu_log_population"
+posteriors = my_thetas[[match(my_par, names(my_thetas))]]
+lower_bound = floor(min(posteriors))
+upper_bound = ceiling(max(posteriors))
+delta = (upper_bound-lower_bound)/4
+priors_mean = 5
+priors_sd = 5
+priors_x = seq(lower_bound,upper_bound,length=1000)
+priors_y = dnorm(priors_x, mean = priors_mean, sd = priors_sd)
+
+## Make plot
+
+hist(posteriors, nclass = 50, probability = TRUE, xlim = c(lower_bound, upper_bound), axes = FALSE, xlab = "", ylab ="", main = "", lty="blank", col = "grey60")
+lines(priors_x, priors_y, col = "red", lwd = 2)
+axis(1, at = seq(lower_bound, upper_bound, delta), labels = seq(lower_bound, upper_bound, delta))
+title(xlab = my_par)
+
+# sigma_patient
+
+## Plot data
+
+my_par = "sigma_patient"
+posteriors = my_thetas[[match(my_par, names(my_thetas))]]
+lower_bound = floor(min(posteriors))
+upper_bound = ceiling(max(posteriors))
+delta = (upper_bound-lower_bound)/4
+priors_mean = 1
+priors_sd = 0.25
+priors_x = seq(lower_bound,upper_bound,length=1000)
+priors_y = dnormTrunc(priors_x, mean = priors_mean, sd = priors_sd, min = 0, max = Inf)
+
+## Make plot
+
+hist(posteriors, nclass = 50, probability = TRUE, xlim = c(lower_bound, upper_bound), axes = FALSE, xlab = "", ylab ="", main = "", lty="blank", col = "grey60")
+lines(priors_x, priors_y, col = "red", lwd = 2)
+axis(1, at = seq(lower_bound, upper_bound, delta), labels = seq(lower_bound, upper_bound, delta))
+title(xlab = my_par)
+
+# sigma_batch
+
+## Plot data
+
+my_par = "sigma_batch"
+posteriors = my_thetas[[match(my_par, names(my_thetas))]]
+lower_bound = floor(min(posteriors))
+upper_bound = ceiling(max(posteriors))
+delta = (upper_bound-lower_bound)/4
+priors_mean = 0.5
+priors_sd = 0.25
+priors_x = seq(lower_bound,upper_bound,length=1000)
+priors_y = dnormTrunc(priors_x, mean = priors_mean, sd = priors_sd, min = 0, max = Inf)
+
+## Make plot
+hist(posteriors, nclass = 50, probability = TRUE, xlim = c(lower_bound, upper_bound), axes = FALSE, xlab = "", ylab ="", main = "", lty="blank", col = "grey60")
+lines(priors_x, priors_y, col = "red", lwd = 2)
+axis(1, at = seq(lower_bound, upper_bound, delta), labels = seq(lower_bound, upper_bound, delta))
+title(xlab = my_par)
+
+# a0_log
+
+## Plot data
+
+my_par = "a0_log"
+posteriors = my_thetas[[match(my_par, names(my_thetas))]]
+lower_bound = floor(min(posteriors))
+upper_bound = ceiling(max(posteriors))
+delta = (upper_bound-lower_bound)/4
+priors_mean = -1
+priors_sd = 1
+priors_x = seq(lower_bound,upper_bound,length=1000)
+priors_y = dnorm(priors_x, mean = priors_mean, sd = priors_sd)
+
+## Make plot
+
+hist(posteriors, nclass = 50, probability = TRUE, xlim = c(lower_bound, upper_bound), axes = FALSE, xlab = "", ylab ="", main = "", lty="blank", col = "grey60")
+lines(priors_x, priors_y, col = "red", lwd = 2)
+axis(1, at = seq(lower_bound, upper_bound, delta), labels = seq(lower_bound, upper_bound, delta))
+title(xlab = my_par)
+
+# a1_log
+
+## Plot data
+
+my_par = "a1_log"
+posteriors = my_thetas[[match(my_par, names(my_thetas))]]
+lower_bound = floor(min(posteriors))
+upper_bound = ceiling(max(posteriors))
+delta = (upper_bound-lower_bound)/4
+priors_mean = -1
+priors_sd = 1
+priors_x = seq(lower_bound,upper_bound,length=1000)
+priors_y = dnorm(priors_x, mean = priors_mean, sd = priors_sd)
+
+## Make plot
+
+hist(posteriors, nclass = 50, probability = TRUE, xlim = c(lower_bound, upper_bound), axes = FALSE, xlab = "", ylab ="", main = "", lty="blank", col = "grey60")
+lines(priors_x, priors_y, col = "red", lwd = 2)
+axis(1, at = seq(lower_bound, upper_bound, delta), labels = seq(lower_bound, upper_bound, delta))
+title(xlab = my_par)
+
+# beta_drug[AS]
+
+## Plot data
+
+my_par = "beta_drug"
+posteriors = my_thetas[[match(my_par, names(my_thetas))]][,1]
+lower_bound = floor(min(posteriors))
+upper_bound = ceiling(max(posteriors))
+delta = (upper_bound-lower_bound)/4
+priors_mean = 0
+priors_sd = 1
+priors_x = seq(lower_bound,upper_bound,length=1000)
+priors_y = dnorm(priors_x, mean = priors_mean, sd = priors_sd)
+
+## Make plot
+
+hist(posteriors, nclass = 50, probability = TRUE, xlim = c(lower_bound, upper_bound), axes = FALSE, xlab = "", ylab ="", main = "", lty="blank", col = "grey60")
+lines(priors_x, priors_y, col = "red", lwd = 2)
+axis(1, at = seq(lower_bound, upper_bound, delta), labels = seq(lower_bound, upper_bound, delta))
+title(xlab = "beta_drug[AS]")
+
+# beta_drug[CQ]
+
+## Plot data
+
+my_par = "beta_drug"
+posteriors = my_thetas[[match(my_par, names(my_thetas))]][,2]
+lower_bound = floor(min(posteriors))
+upper_bound = ceiling(max(posteriors))
+delta = (upper_bound-lower_bound)/4
+priors_mean = 0
+priors_sd = 1
+priors_x = seq(lower_bound,upper_bound,length=1000)
+priors_y = dnorm(priors_x, mean = priors_mean, sd = priors_sd)
+
+## Make plot
+
+hist(posteriors, nclass = 50, probability = TRUE, xlim = c(lower_bound, upper_bound), axes = FALSE, xlab = "", ylab ="", main = "", lty="blank", col = "grey60")
+lines(priors_x, priors_y, col = "red", lwd = 2)
+axis(1, at = seq(lower_bound, upper_bound, delta), labels = seq(lower_bound, upper_bound, delta))
+title(xlab = "beta_drug[CQ]")
+
+# beta_drug[MB]
+
+## Plot data
+
+my_par = "beta_drug"
+posteriors = my_thetas[[match(my_par, names(my_thetas))]][,3]
+lower_bound = floor(min(posteriors))
+upper_bound = ceiling(max(posteriors))
+delta = (upper_bound-lower_bound)/4
+priors_mean = 0
+priors_sd = 1
+priors_x = seq(lower_bound,upper_bound,length=1000)
+priors_y = dnorm(priors_x, mean = priors_mean, sd = priors_sd)
+
+## Make plot
+
+hist(posteriors, nclass = 50, probability = TRUE, xlim = c(lower_bound, upper_bound), axes = FALSE, xlab = "", ylab ="", main = "", lty="blank", col = "grey60")
+lines(priors_x, priors_y, col = "red", lwd = 2)
+axis(1, at = seq(lower_bound, upper_bound, delta), labels = seq(lower_bound, upper_bound, delta))
+title(xlab = "beta_drug[MB]")
+
+# art_wash
+
+## Plot data
+
+my_par = "art_wash"
+posteriors = my_thetas[[match(my_par, names(my_thetas))]]
+lower_bound = floor(min(posteriors))
+upper_bound = ceiling(max(posteriors))
+delta = (upper_bound-lower_bound)/4
+priors_mean = 0
+priors_sd = 1
+priors_x = seq(lower_bound,upper_bound,length=1000)
+priors_y = dnorm(priors_x, mean = priors_mean, sd = priors_sd)
+
+## Make plot
+
+hist(posteriors, nclass = 50, probability = TRUE, xlim = c(lower_bound, upper_bound), axes = FALSE, xlab = "", ylab ="", main = "", lty="blank", col = "grey60")
+lines(priors_x, priors_y, col = "red", lwd = 2)
+axis(1, at = seq(lower_bound, upper_bound, delta), labels = seq(lower_bound, upper_bound, delta))
+title(xlab = my_par)
+
+# beta_covs[baseline_oocysts]
+
+## Plot data
+
+my_par = "beta_covs"
+posteriors = my_thetas[[match(my_par, names(my_thetas))]][,1]
+lower_bound = floor(min(posteriors))
+upper_bound = ceiling(max(posteriors))
+delta = (upper_bound-lower_bound)/4
+priors_mean = 0
+priors_sd = 1
+priors_x = seq(lower_bound,upper_bound,length=1000)
+priors_y = dnorm(priors_x, mean = priors_mean, sd = priors_sd)
+
+## Make plot
+
+hist(posteriors, nclass = 50, probability = TRUE, xlim = c(lower_bound, upper_bound), axes = FALSE, xlab = "", ylab ="", main = "", lty="blank", col = "grey60")
+lines(priors_x, priors_y, col = "red", lwd = 2)
+axis(1, at = seq(lower_bound, upper_bound, delta), labels = seq(lower_bound, upper_bound, delta))
+title(xlab = "beta_covs[baseline_oocyst_count]")
+
+# beta_covs[baseline_parasitemia]
+
+## Plot data
+
+my_par = "beta_covs"
+posteriors = my_thetas[[match(my_par, names(my_thetas))]][,2]
+lower_bound = floor(min(posteriors))
+upper_bound = ceiling(max(posteriors))
+delta = (upper_bound-lower_bound)/4
+priors_mean = 0
+priors_sd = 1
+priors_x = seq(lower_bound,upper_bound,length=1000)
+priors_y = dnorm(priors_x, mean = priors_mean, sd = priors_sd)
+
+## Make plot
+
+hist(posteriors, nclass = 50, probability = TRUE, xlim = c(lower_bound, upper_bound), axes = FALSE, xlab = "", ylab ="", main = "", lty="blank", col = "grey60")
+lines(priors_x, priors_y, col = "red", lwd = 2)
+axis(1, at = seq(lower_bound, upper_bound, delta), labels = seq(lower_bound, upper_bound, delta))
+title(xlab = "beta_covs[baseline_asexual_parasitaemia]")
+
+# beta_covs[baseline_gametocytemia]
+
+## Plot data
+
+my_par = "beta_covs"
+posteriors = my_thetas[[match(my_par, names(my_thetas))]][,3]
+lower_bound = floor(min(posteriors))
+upper_bound = ceiling(max(posteriors))
+delta = (upper_bound-lower_bound)/4
+priors_mean = 0
+priors_sd = 1
+priors_x = seq(lower_bound,upper_bound,length=1000)
+priors_y = dnorm(priors_x, mean = priors_mean, sd = priors_sd)
+
+## Make plot
+
+hist(posteriors, nclass = 50, probability = TRUE, xlim = c(lower_bound, upper_bound), axes = FALSE, xlab = "", ylab ="", main = "", lty="blank", col = "grey60")
+lines(priors_x, priors_y, col = "red", lwd = 2)
+axis(1, at = seq(lower_bound, upper_bound, delta), labels = seq(lower_bound, upper_bound, delta))
+title(xlab = "beta_covs[baseline_gametocytaemia]")
+
+```
+
+### Sporozoite stage
+
+```{r prior_posterior_sporozoites}
+
+# Extract posterior draws
+
+my_thetas = rstan::extract(out_sporozoite)
+
+# Graphical parameters
+
+par(mfrow = c(5,3), las=1, font.lab = 2, family='Times New Roman')
+
+# mu_log_population
+
+## Plot data
+
+my_par = "mu_log_population"
+posteriors = my_thetas[[match(my_par, names(my_thetas))]]
+lower_bound = floor(min(posteriors))
+upper_bound = ceiling(max(posteriors))
+delta = (upper_bound-lower_bound)/4
+priors_mean = 9
+priors_sd = 5
+priors_x = seq(lower_bound,upper_bound,length=1000)
+priors_y = dnorm(priors_x, mean = priors_mean, sd = priors_sd)
+
+## Make plot
+
+hist(posteriors, nclass = 50, probability = TRUE, xlim = c(lower_bound, upper_bound), axes = FALSE, xlab = "", ylab ="", main = "", lty="blank", col = "grey60")
+lines(priors_x, priors_y, col = "red", lwd = 2)
+axis(1, at = seq(lower_bound, upper_bound, delta), labels = seq(lower_bound, upper_bound, delta))
+title(xlab = my_par)
+
+# sigma_patient
+
+## Plot data
+
+my_par = "sigma_patient"
+posteriors = my_thetas[[match(my_par, names(my_thetas))]]
+lower_bound = floor(min(posteriors))
+upper_bound = ceiling(max(posteriors))
+delta = (upper_bound-lower_bound)/4
+priors_mean = 1
+priors_sd = 0.25
+priors_x = seq(lower_bound,upper_bound,length=1000)
+priors_y = dnormTrunc(priors_x, mean = priors_mean, sd = priors_sd, min = 0, max = Inf)
+
+## Make plot
+
+hist(posteriors, nclass = 50, probability = TRUE, xlim = c(lower_bound, upper_bound), axes = FALSE, xlab = "", ylab ="", main = "", lty="blank", col = "grey60")
+lines(priors_x, priors_y, col = "red", lwd = 2)
+axis(1, at = seq(lower_bound, upper_bound, delta), labels = seq(lower_bound, upper_bound, delta))
+title(xlab = my_par)
+
+# sigma_batch
+
+## Plot data
+
+my_par = "sigma_batch"
+posteriors = my_thetas[[match(my_par, names(my_thetas))]]
+lower_bound = floor(min(posteriors))
+upper_bound = ceiling(max(posteriors))
+delta = (upper_bound-lower_bound)/4
+priors_mean = 0.5
+priors_sd = 0.25
+priors_x = seq(lower_bound,upper_bound,length=1000)
+priors_y = dnormTrunc(priors_x, mean = priors_mean, sd = priors_sd, min = 0, max = Inf)
+
+## Make plot
+hist(posteriors, nclass = 50, probability = TRUE, xlim = c(lower_bound, upper_bound), axes = FALSE, xlab = "", ylab ="", main = "", lty="blank", col = "grey60")
+lines(priors_x, priors_y, col = "red", lwd = 2)
+axis(1, at = seq(lower_bound, upper_bound, delta), labels = seq(lower_bound, upper_bound, delta))
+title(xlab = my_par)
+
+# a0_log
+
+## Plot data
+
+my_par = "a0_log"
+posteriors = my_thetas[[match(my_par, names(my_thetas))]]
+lower_bound = floor(min(posteriors))
+upper_bound = ceiling(max(posteriors))
+delta = (upper_bound-lower_bound)/4
+priors_mean = -1
+priors_sd = 1
+priors_x = seq(lower_bound,upper_bound,length=1000)
+priors_y = dnorm(priors_x, mean = priors_mean, sd = priors_sd)
+
+## Make plot
+
+hist(posteriors, nclass = 50, probability = TRUE, xlim = c(lower_bound, upper_bound), axes = FALSE, xlab = "", ylab ="", main = "", lty="blank", col = "grey60")
+lines(priors_x, priors_y, col = "red", lwd = 2)
+axis(1, at = seq(lower_bound, upper_bound, delta), labels = seq(lower_bound, upper_bound, delta))
+title(xlab = my_par)
+
+# a1_log
+
+## Plot data
+
+my_par = "a1_log"
+posteriors = my_thetas[[match(my_par, names(my_thetas))]]
+lower_bound = floor(min(posteriors))
+upper_bound = ceiling(max(posteriors))
+delta = (upper_bound-lower_bound)/4
+priors_mean = -1
+priors_sd = 1
+priors_x = seq(lower_bound,upper_bound,length=1000)
+priors_y = dnorm(priors_x, mean = priors_mean, sd = priors_sd)
+
+## Make plot
+
+hist(posteriors, nclass = 50, probability = TRUE, xlim = c(lower_bound, upper_bound), axes = FALSE, xlab = "", ylab ="", main = "", lty="blank", col = "grey60")
+lines(priors_x, priors_y, col = "red", lwd = 2)
+axis(1, at = seq(lower_bound, upper_bound, delta), labels = seq(lower_bound, upper_bound, delta))
+title(xlab = my_par)
+
+# beta_drug[AS]
+
+## Plot data
+
+my_par = "beta_drug"
+posteriors = my_thetas[[match(my_par, names(my_thetas))]][,1]
+lower_bound = floor(min(posteriors))
+upper_bound = ceiling(max(posteriors))
+delta = (upper_bound-lower_bound)/4
+priors_mean = 0
+priors_sd = 1
+priors_x = seq(lower_bound,upper_bound,length=1000)
+priors_y = dnorm(priors_x, mean = priors_mean, sd = priors_sd)
+
+## Make plot
+
+hist(posteriors, nclass = 50, probability = TRUE, xlim = c(lower_bound, upper_bound), axes = FALSE, xlab = "", ylab ="", main = "", lty="blank", col = "grey60")
+lines(priors_x, priors_y, col = "red", lwd = 2)
+axis(1, at = seq(lower_bound, upper_bound, delta), labels = seq(lower_bound, upper_bound, delta))
+title(xlab = "beta_drug[AS]")
+
+# beta_drug[CQ]
+
+## Plot data
+
+my_par = "beta_drug"
+posteriors = my_thetas[[match(my_par, names(my_thetas))]][,2]
+lower_bound = floor(min(posteriors))
+upper_bound = ceiling(max(posteriors))
+delta = (upper_bound-lower_bound)/4
+priors_mean = 0
+priors_sd = 1
+priors_x = seq(lower_bound,upper_bound,length=1000)
+priors_y = dnorm(priors_x, mean = priors_mean, sd = priors_sd)
+
+## Make plot
+
+hist(posteriors, nclass = 50, probability = TRUE, xlim = c(lower_bound, upper_bound), axes = FALSE, xlab = "", ylab ="", main = "", lty="blank", col = "grey60")
+lines(priors_x, priors_y, col = "red", lwd = 2)
+axis(1, at = seq(lower_bound, upper_bound, delta), labels = seq(lower_bound, upper_bound, delta))
+title(xlab = "beta_drug[CQ]")
+
+# beta_drug[MB]
+
+## Plot data
+
+my_par = "beta_drug"
+posteriors = my_thetas[[match(my_par, names(my_thetas))]][,3]
+lower_bound = floor(min(posteriors))
+upper_bound = ceiling(max(posteriors))
+delta = (upper_bound-lower_bound)/4
+priors_mean = 0
+priors_sd = 1
+priors_x = seq(lower_bound,upper_bound,length=1000)
+priors_y = dnorm(priors_x, mean = priors_mean, sd = priors_sd)
+
+## Make plot
+
+hist(posteriors, nclass = 50, probability = TRUE, xlim = c(lower_bound, upper_bound), axes = FALSE, xlab = "", ylab ="", main = "", lty="blank", col = "grey60")
+lines(priors_x, priors_y, col = "red", lwd = 2)
+axis(1, at = seq(lower_bound, upper_bound, delta), labels = seq(lower_bound, upper_bound, delta))
+title(xlab = "beta_drug[MB]")
+
+# art_wash
+
+## Plot data
+
+my_par = "art_wash"
+posteriors = my_thetas[[match(my_par, names(my_thetas))]]
+lower_bound = floor(min(posteriors))
+upper_bound = ceiling(max(posteriors))
+delta = (upper_bound-lower_bound)/4
+priors_mean = 0
+priors_sd = 1
+priors_x = seq(lower_bound,upper_bound,length=1000)
+priors_y = dnorm(priors_x, mean = priors_mean, sd = priors_sd)
+
+## Make plot
+
+hist(posteriors, nclass = 50, probability = TRUE, xlim = c(lower_bound, upper_bound), axes = FALSE, xlab = "", ylab ="", main = "", lty="blank", col = "grey60")
+lines(priors_x, priors_y, col = "red", lwd = 2)
+axis(1, at = seq(lower_bound, upper_bound, delta), labels = seq(lower_bound, upper_bound, delta))
+title(xlab = my_par)
+
+# beta_covs[baseline_oocysts]
+
+## Plot data
+
+my_par = "beta_covs"
+posteriors = my_thetas[[match(my_par, names(my_thetas))]][,1]
+lower_bound = floor(min(posteriors))
+upper_bound = ceiling(max(posteriors))
+delta = (upper_bound-lower_bound)/4
+priors_mean = 0
+priors_sd = 1
+priors_x = seq(lower_bound,upper_bound,length=1000)
+priors_y = dnorm(priors_x, mean = priors_mean, sd = priors_sd)
+
+## Make plot
+
+hist(posteriors, nclass = 50, probability = TRUE, xlim = c(lower_bound, upper_bound), axes = FALSE, xlab = "", ylab ="", main = "", lty="blank", col = "grey60")
+lines(priors_x, priors_y, col = "red", lwd = 2)
+axis(1, at = seq(lower_bound, upper_bound, delta), labels = seq(lower_bound, upper_bound, delta))
+title(xlab = "beta_covs[baseline_oocyst_count]")
+
+# beta_covs[baseline_parasitemia]
+
+## Plot data
+
+my_par = "beta_covs"
+posteriors = my_thetas[[match(my_par, names(my_thetas))]][,2]
+lower_bound = floor(min(posteriors))
+upper_bound = ceiling(max(posteriors))
+delta = (upper_bound-lower_bound)/4
+priors_mean = 0
+priors_sd = 1
+priors_x = seq(lower_bound,upper_bound,length=1000)
+priors_y = dnorm(priors_x, mean = priors_mean, sd = priors_sd)
+
+## Make plot
+
+hist(posteriors, nclass = 50, probability = TRUE, xlim = c(lower_bound, upper_bound), axes = FALSE, xlab = "", ylab ="", main = "", lty="blank", col = "grey60")
+lines(priors_x, priors_y, col = "red", lwd = 2)
+axis(1, at = seq(lower_bound, upper_bound, delta), labels = seq(lower_bound, upper_bound, delta))
+title(xlab = "beta_covs[baseline_asexual_parasiteamia]")
+
+# beta_covs[baseline_gametocytemia]
+
+## Plot data
+
+my_par = "beta_covs"
+posteriors = my_thetas[[match(my_par, names(my_thetas))]][,3]
+lower_bound = floor(min(posteriors))
+upper_bound = ceiling(max(posteriors))
+delta = (upper_bound-lower_bound)/4
+priors_mean = 0
+priors_sd = 1
+priors_x = seq(lower_bound,upper_bound,length=1000)
+priors_y = dnorm(priors_x, mean = priors_mean, sd = priors_sd)
+
+## Make plot
+
+hist(posteriors, nclass = 50, probability = TRUE, xlim = c(lower_bound, upper_bound), axes = FALSE, xlab = "", ylab ="", main = "", lty="blank", col = "grey60")
+lines(priors_x, priors_y, col = "red", lwd = 2)
+axis(1, at = seq(lower_bound, upper_bound, delta), labels = seq(lower_bound, upper_bound, delta))
+title(xlab = "beta_covs[baseline_gametocytaemia]")
+
+```
