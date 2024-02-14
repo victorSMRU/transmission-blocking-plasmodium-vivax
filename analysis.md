@@ -1,6 +1,6 @@
 ---
-title: "Transmission-blocking activity of artesunate, chloroquine and methylene blue on Plasmodium vivax gametocytes"
-author: "Victor Chaumeau & James A. Watson"
+title: "Transmission-blocking activity of artesunate, chloroquine and methylene blue on _Plasmodium vivax_ gametocytes"
+author: "Victor Chaumeau"
 date: "2024-02-14"
 output:
   pdf_document:
@@ -8,13 +8,6 @@ output:
     number_sections: no
     keep_md: yes
 ---
-
-# Foreword
-
-This analysis was carried out by Dr. Victor Chaumeau* under the supervision of Dr. James A. Waston, who wrote the Stan code for the Bayesian multi-level model used in this study.
-
-\* For correspondence: victor@shoklo-unit.com
-
 
 
 
