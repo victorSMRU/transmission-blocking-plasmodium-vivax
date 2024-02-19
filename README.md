@@ -8,7 +8,7 @@ _Medley GF, Sinden RE, Fleck S, Billingsley PF, Tirawanchai N, Rodriguez MH. Het
 
 \*For correspondence: victor@shoklo-unit.com
 
-The preprint with the results (under review at elife): __to be completed__
+The preprint with the results (under review at elife): https://doi.org/10.1101/2024.02.18.580875
 
 ## Data
 
