@@ -1389,7 +1389,8 @@ dta_agg =
   aggregate(
     y ~ regimen + exposure,
     data = df,
-    FUN = function(x) round(mean(x),2))
+    # FUN = function(x) round(exp(mean(log(x[x>0]))),2))
+   FUN = function(x) round(mean(x),2))
 
 mean_oocyst_count_as_control = dta_agg$y[dta_agg$regimen == 1 & dta_agg$exposure == 0]
 mean_oocyst_count_as_treated = dta_agg$y[dta_agg$regimen == 1 & dta_agg$exposure == 1]
@@ -1415,7 +1416,8 @@ dta_agg =
   aggregate(
     y ~ regimen + exposure,
     data = df,
-    FUN = function(x) as.character(round(mean(x),1)))
+    # FUN = function(x) round(exp(mean(log(x[x>0]))),2))
+   FUN = function(x) round(mean(x),2))
 
 mean_sporozoite_count_as_control = dta_agg$y[dta_agg$regimen == 1 & dta_agg$exposure == 0]
 mean_sporozoite_count_as_treated = dta_agg$y[dta_agg$regimen == 1 & dta_agg$exposure == 1]
