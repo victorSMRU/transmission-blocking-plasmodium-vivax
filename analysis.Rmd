@@ -874,59 +874,40 @@ dat$regimen2=as.factor(dat$regimen*dat$treatment)
 mod = glmer(as.numeric(positive) ~ regimen2 + (1|patient),
           family = binomial(link = "logit"), data = dat)
 
-# Artesunate
+# Calculate baseline probabilities
 
-beta.estimate = summary(mod)$coefficients[2,1]
-beta.se = summary(mod)$coefficients[2,2]
-beta.error = 1.96*beta.se + beta.estimate
-beta.lower= beta.estimate - beta.error
-beta.upper = beta.estimate + beta.error
-p.value = round(log10(summary(mod)$coefficient[2,4]), 2)
-
+temp = dat[dat$regimen == 1 & dat$treatment == 0, ]
+p1 = sum(temp$positive)/length(temp$positive)
 temp = dat[dat$regimen == 2 & dat$treatment == 0, ]
-p = sum(temp$positive)/length(temp$positive)
+p2 = sum(temp$positive)/length(temp$positive)
+temp = dat[dat$regimen == 3 & dat$treatment == 0, ]
+p3 = sum(temp$positive)/length(temp$positive)
+p = c(p1, p2, p3)
 
-rr.estimate = round(odds_to_rr(p=p, or=exp(beta.estimate)), 2)
-rr.lower = round(odds_to_rr(p=p, or=exp(beta.lower)), 2)
-rr.upper = round(odds_to_rr(p=p, or=exp(beta.upper)), 4)
-rr.ci = paste0(rr.estimate, ' [95%CI ', rr.upper, ' to ', rr.lower, '], log10[p-value] = ', p.value)
-rr_as_oo = rr.ci
+# Map OR to RR
 
-# Chloroquine
+lower.bound = odds_to_rr(p=p, or=exp(summary(mod)$coefficients[-1,1] - 1.96*summary(mod)$coefficients[-1,2]))
 
-beta.estimate = summary(mod)$coefficients[3,1]
-beta.se = summary(mod)$coefficients[3,2]
-beta.error = 1.96*beta.se + beta.estimate
-beta.lower= beta.estimate - beta.error
-beta.upper = beta.estimate + beta.error
-p.value = round(log10(summary(mod)$coefficient[3,4]), 2)
+point.estimate = odds_to_rr(p=p, or=exp(summary(mod)$coefficients[-1,1] ))
 
-temp = dat[dat$regimen == 2 & dat$treatment == 0, ]
-p = sum(temp$positive)/length(temp$positive)
+upper.bound = odds_to_rr(p=p, or=exp(summary(mod)$coefficients[-1,1] + 1.96*summary(mod)$coefficients[-1,2]))
 
-rr.estimate = round(odds_to_rr(p=p, or=exp(beta.estimate)), 2)
-rr.lower = round(odds_to_rr(p=p, or=exp(beta.lower)), 2)
-rr.upper = round(odds_to_rr(p=p, or=exp(beta.upper)), 2)
-rr.ci = paste0(rr.estimate, ' [95%CI ', rr.upper, ' to ', rr.lower, '], log10[p-value] = ', p.value)
-rr_cq_oo = rr.ci
+p.values = ifelse(round(summary(mod)$coefficient[-1,4], 4) == 0, '<0.0001', paste0('=',round(summary(mod)$coefficient[-1,4], 4)))
 
-# Methylene blue
+# Format the results for main text citation
 
-beta.estimate = summary(mod)$coefficients[4,1]
-beta.se = summary(mod)$coefficients[4,2]
-beta.error = 1.96*beta.se + beta.estimate
-beta.lower= beta.estimate - beta.error
-beta.upper = beta.estimate + beta.error
-p.value = round(log10(summary(mod)$coefficient[4,4]), 2)
+df = data.frame(
+  point.estimate = point.estimate,
+  lower.bound = lower.bound,
+  upper.bound = upper.bound,
+  p.values = p.values
+  )
 
-temp = dat[dat$regimen == 2 & dat$treatment == 0, ]
-p = sum(temp$positive)/length(temp$positive)
+df$main.text = paste(round(df$point.estimate, 3), ' [95%CI: ', round(df$lower.bound, 3), ' to ', round(df$upper.bound, 3), '], p-value', df$p.values, sep = '')
 
-rr.estimate = round(odds_to_rr(p=p, or=exp(beta.estimate)), 3)
-rr.lower = round(odds_to_rr(p=p, or=exp(beta.lower)), 2)
-rr.upper = round(odds_to_rr(p=p, or=exp(beta.upper)), 4)
-rr.ci = paste0(rr.estimate, ' [95%CI ', rr.upper, ' to ', rr.lower, '], log10[p-value] = ', p.value)
-rr_mb_oo = rr.ci
+rr_as_oo = df$main.text[1]
+rr_cq_oo = df$main.text[2]
+rr_mb_oo = df$main.text[3]
 
 # Sporozoite stage
 
@@ -946,59 +927,40 @@ dat$regimen2=as.factor(dat$regimen*dat$treatment)
 mod = glmer(as.numeric(positive) ~ regimen2 + (1|patient),
           family = binomial(link = "logit"), data = dat)
 
-# Artesunate
+# Calculate baseline probabilities
 
-beta.estimate = summary(mod)$coefficients[2,1]
-beta.se = summary(mod)$coefficients[2,2]
-beta.error = 1.96*beta.se + beta.estimate
-beta.lower= beta.estimate - beta.error
-beta.upper = beta.estimate + beta.error
-p.value = round(log10(summary(mod)$coefficient[2,4]), 2)
-
+temp = dat[dat$regimen == 1 & dat$treatment == 0, ]
+p1 = sum(temp$positive)/length(temp$positive)
 temp = dat[dat$regimen == 2 & dat$treatment == 0, ]
-p = sum(temp$positive)/length(temp$positive)
+p2 = sum(temp$positive)/length(temp$positive)
+temp = dat[dat$regimen == 3 & dat$treatment == 0, ]
+p3 = sum(temp$positive)/length(temp$positive)
+p = c(p1, p2, p3)
 
-rr.estimate = round(odds_to_rr(p=p, or=exp(beta.estimate)), 4)
-rr.lower = round(odds_to_rr(p=p, or=exp(beta.lower)), 2)
-rr.upper = round(odds_to_rr(p=p, or=exp(beta.upper)), 4)
-rr.ci = paste0(rr.estimate, ' [95%CI ', rr.upper, ' to ', rr.lower, '], log10[p-value] = ', p.value)
-rr_as_sp = rr.ci
+# Map OR to RR
 
-# Chloroquine
+lower.bound = odds_to_rr(p=p, or=exp(summary(mod)$coefficients[-1,1] - 1.96*summary(mod)$coefficients[-1,2]))
 
-beta.estimate = summary(mod)$coefficients[3,1]
-beta.se = summary(mod)$coefficients[3,2]
-beta.error = 1.96*beta.se + beta.estimate
-beta.lower= beta.estimate - beta.error
-beta.upper = beta.estimate + beta.error
-p.value = round(log10(summary(mod)$coefficient[3,4]), 2)
+point.estimate = odds_to_rr(p=p, or=exp(summary(mod)$coefficients[-1,1] ))
 
-temp = dat[dat$regimen == 2 & dat$treatment == 0, ]
-p = sum(temp$positive)/length(temp$positive)
+upper.bound = odds_to_rr(p=p, or=exp(summary(mod)$coefficients[-1,1] + 1.96*summary(mod)$coefficients[-1,2]))
 
-rr.estimate = round(odds_to_rr(p=p, or=exp(beta.estimate)), 2)
-rr.lower = round(odds_to_rr(p=p, or=exp(beta.lower)), 2)
-rr.upper = round(odds_to_rr(p=p, or=exp(beta.upper)), 2)
-rr.ci = paste0(rr.estimate, ' [95%CI ', rr.upper, ' to ', rr.lower, '], log10[p-value] = ', p.value)
-rr_cq_sp = rr.ci
+p.values = ifelse(round(summary(mod)$coefficient[-1,4], 4) == 0, '<0.0001', paste0('=',round(summary(mod)$coefficient[-1,4], 4)))
 
-# Methylene blue
+# Format the results for main text citation
 
-beta.estimate = summary(mod)$coefficients[4,1]
-beta.se = summary(mod)$coefficients[4,2]
-beta.error = 1.96*beta.se + beta.estimate
-beta.lower= beta.estimate - beta.error
-beta.upper = beta.estimate + beta.error
-p.value = round(log10(summary(mod)$coefficient[4,4]), 2)
+df = data.frame(
+  point.estimate = point.estimate,
+  lower.bound = lower.bound,
+  upper.bound = upper.bound,
+  p.values = p.values
+  )
 
-temp = dat[dat$regimen == 2 & dat$treatment == 0, ]
-p = sum(temp$positive)/length(temp$positive)
+df$main.text = paste(round(df$point.estimate, 3), ' [95%CI: ', round(df$lower.bound, 3), ' to ', round(df$upper.bound, 3), '], p-value', df$p.values, sep = '')
 
-rr.estimate = round(odds_to_rr(p=p, or=exp(beta.estimate)), 4)
-rr.lower = round(odds_to_rr(p=p, or=exp(beta.lower)), 2)
-rr.upper = round(odds_to_rr(p=p, or=exp(beta.upper)), 5)
-rr.ci = paste0(rr.estimate, ' [95%CI ', rr.upper, ' to ', rr.lower, '], log10[p-value] = ', p.value)
-rr_mb_sp = rr.ci
+rr_as_sp = df$main.text[1]
+rr_cq_sp = df$main.text[2]
+rr_mb_sp = df$main.text[3]
 
 ```
 
@@ -1367,21 +1329,21 @@ my_res = as.data.frame(apply(df[, ls_pars], 2, quantile, probs = c(0.5,0.025,0.9
 
 ## Artesunate
 
-beta_artesunate_oocyst = as.character(round(1/exp(my_res$`beta_drug[1]`[1]),2))
-beta_artesunate_oocyst_lower = as.character(round(1/exp(my_res$`beta_drug[1]`[2]),2))
-beta_artesunate_oocyst_upper = as.character(round(1/exp(my_res$`beta_drug[1]`[3]),2))
+beta_artesunate_oocyst = as.character(round(1/exp(my_res$`beta_drug[1]`[1]),0))
+beta_artesunate_oocyst_lower = as.character(round(1/exp(my_res$`beta_drug[1]`[3]),0))
+beta_artesunate_oocyst_upper = as.character(round(1/exp(my_res$`beta_drug[1]`[2]),0))
 
 ## Chloroquine
 
 beta_chloroquine_oocyst = as.character(round(1/exp(my_res$`beta_drug[2]`[1]),2))
-beta_chloroquine_oocyst_lower = as.character(round(1/exp(my_res$`beta_drug[2]`[2]),2))
-beta_chloroquine_oocyst_upper = as.character(round(1/exp(my_res$`beta_drug[2]`[3]),2))
+beta_chloroquine_oocyst_lower = as.character(round(1/exp(my_res$`beta_drug[2]`[3]),2))
+beta_chloroquine_oocyst_upper = as.character(round(1/exp(my_res$`beta_drug[2]`[2]),2))
 
 ## Methylene blue
 
-beta_methylene_blue_oocyst = as.character(round(1/exp(my_res$`beta_drug[3]`[1]),2))
-beta_methylene_blue_oocyst_lower = as.character(round(1/exp(my_res$`beta_drug[3]`[2]),2))
-beta_methylene_blue_oocyst_upper = as.character(round(1/exp(my_res$`beta_drug[3]`[3]),2))
+beta_methylene_blue_oocyst = as.character(round(1/exp(my_res$`beta_drug[3]`[1]),0))
+beta_methylene_blue_oocyst_lower = as.character(round(1/exp(my_res$`beta_drug[3]`[3]),0))
+beta_methylene_blue_oocyst_upper = as.character(round(1/exp(my_res$`beta_drug[3]`[2]),0))
 
 # Sporozoite stage
 
@@ -1390,21 +1352,21 @@ my_res = as.data.frame(apply(df[, ls_pars], 2, quantile, probs = c(0.5,0.025,0.9
 
 ## Artesunate
 
-beta_artesunate_sporozoite = as.character(round(1/exp(my_res$`beta_drug[1]`[1]),2))
-beta_artesunate_sporozoite_lower = as.character(round(1/exp(my_res$`beta_drug[1]`[2]),2))
-beta_artesunate_sporozoite_upper = as.character(round(1/exp(my_res$`beta_drug[1]`[3]),2))
+beta_artesunate_sporozoite = as.character(round(1/exp(my_res$`beta_drug[1]`[1]),0))
+beta_artesunate_sporozoite_lower = as.character(round(1/exp(my_res$`beta_drug[1]`[3]),0))
+beta_artesunate_sporozoite_upper = as.character(round(1/exp(my_res$`beta_drug[1]`[2]),0))
 
 ## Chloroquine
 
 beta_chloroquine_sporozoite = as.character(round(1/exp(my_res$`beta_drug[2]`[1]),2))
-beta_chloroquine_sporozoite_lower = as.character(round(1/exp(my_res$`beta_drug[2]`[2]),2))
-beta_chloroquine_sporozoite_upper = as.character(round(1/exp(my_res$`beta_drug[2]`[3]),2))
+beta_chloroquine_sporozoite_lower = as.character(round(1/exp(my_res$`beta_drug[2]`[3]),2))
+beta_chloroquine_sporozoite_upper = as.character(round(1/exp(my_res$`beta_drug[2]`[2]),2))
 
 ## Methylene blue
 
-beta_methylene_blue_sporozoite = as.character(round(1/exp(my_res$`beta_drug[3]`[1]),2))
-beta_methylene_blue_sporozoite_lower = as.character(round(1/exp(my_res$`beta_drug[3]`[2]),2))
-beta_methylene_blue_sporozoite_upper = as.character(round(1/exp(my_res$`beta_drug[3]`[3]),2))
+beta_methylene_blue_sporozoite = as.character(round(1/exp(my_res$`beta_drug[3]`[1]),0))
+beta_methylene_blue_sporozoite_lower = as.character(round(1/exp(my_res$`beta_drug[3]`[3]),0))
+beta_methylene_blue_sporozoite_upper = as.character(round(1/exp(my_res$`beta_drug[3]`[2]),0))
 
 ```
 
