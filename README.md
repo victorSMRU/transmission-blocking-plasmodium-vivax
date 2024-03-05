@@ -2,7 +2,7 @@
 
 This repository provides data and code for the analysis of a laboratory study carried out to assess the transmission-blocking activity of antimalarial drugs (artesunate, chloroquine and methylene blue) against _Plasmodium vivax_ gametoyctes.
 
-This analysis was carried out by Dr. Victor Chaumeau* under the supervision of Dr. James A. Waston, who developed the analysis framework and wrote the Stan code for the Bayesian multi-level model used in this study, based on the original work of Medeley _et al._
+This analysis was carried out by Victor Chaumeau* under the supervision of James A. Waston, who developed the analysis framework and wrote the Stan code for the Bayesian multi-level model used in this study, based on the original work of Medeley _et al._
 
 _Medley GF, Sinden RE, Fleck S, Billingsley PF, Tirawanchai N, Rodriguez MH. Heterogeneity in patterns of malarial oocyst infections in the mosquito vector. Parasitology. 1993 Jun;106 ( Pt 5):441–9._
 
